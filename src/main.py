@@ -1,5 +1,6 @@
 from datetime import datetime
 import logging
+import os
 from typing import Dict, List, Any, Optional, Tuple
 from aiohttp import request
 from croniter import croniter
@@ -86,8 +87,16 @@ class MusicSyncApp:
             
             # 1. 查找今日播放列表
             uid = self.config.get("uid")
-            today = datetime.now().strftime("%Y%m%d")
-            # today = '20251017'
+            # 检测是否为调试模式（根据launch.json中的环境变量）
+            is_debug = os.environ.get("DEBUG_MODE") == "True"
+
+            if is_debug:
+                # 调试时使用固定日期
+                today = '20251017'
+            else:
+                # 运行时使用当前日期
+                today = datetime.now().strftime("%Y%m%d")
+            
             today_playlist = self.NeteaseApi.find_todays_playlist(uid,today)
             
             if not today_playlist:
