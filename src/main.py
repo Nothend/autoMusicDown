@@ -86,8 +86,8 @@ class MusicSyncApp:
             
             # 1. 查找今日播放列表
             uid = self.config.get("uid")
-            today = datetime.now().strftime("%Y%m%d")
-            # today = '20251017'
+            # today = datetime.now().strftime("%Y%m%d")
+            today = '20251017'
             today_playlist = self.NeteaseApi.find_todays_playlist(uid,today)
             
             if not today_playlist:
@@ -114,7 +114,7 @@ class MusicSyncApp:
                 for song in songs:
                     title = song.get("name")
                     artists = song.get("artists", "")
-                    album = song.get("album", {}).get("name", "")
+                    album = song.get("album", "")
                     
                     exists = self.navidrome.navidrome_song_exists(title, artists, album)
                     if not exists.get("exists", False):
@@ -122,14 +122,16 @@ class MusicSyncApp:
             elif self.use_mysql:
                 self.logger.info("启用MySQLe检查，筛选不在库中的歌曲")
                 self.mysql_checker=MySQLChecker(self.config)
+                self.mysql_checker.open_connection()
                 for song in songs:
                     title = song.get("name")
                     artists = song.get("artists", "")
-                    album = song.get("album", {}).get("name", "")
+                    album = song.get("album", "")
                     
                     exists = self.mysql_checker.check_song(title, artists)
-                    if not exists.get("exists", False):
+                    if not exists:
                         songs_to_download.append(song)
+                self.mysql_checker.close_connection()
             else:
                  self.logger.info("未启用任何检查")   
         

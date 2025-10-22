@@ -54,7 +54,7 @@ class MySQLChecker:
         self.config = config  # 保存Config实例
         self.logger = logging.getLogger(__name__)  # 初始化日志
         self.mysql_config: Optional[MySQLConfig] = None
-        self.mysql_connection: Optional[pymysql.connections.Connection] = None
+        self.mysql_connection: Optional[pymysql.connections.Connection] = None  # 连接由外部控制生命周期
 
         # 初始化MySQL配置
         try:
@@ -62,7 +62,28 @@ class MySQLChecker:
             self.logger.info("MySQL配置初始化成功")
         except Exception as e:
             self.logger.error(f"MySQL配置初始化失败: {str(e)}")
-            self.use_mysql = False  # 初始化失败则禁用MySQL
+            raise  # 初始化失败直接抛出，避免后续调用异常
+
+    def open_connection(self) -> None:
+        """手动打开数据库连接（外部控制）"""
+        if self.mysql_connection and not self.mysql_connection._closed:
+            self.logger.debug("数据库连接已存在，无需重复打开")
+            return
+
+        try:
+            self._get_mysql_connection()  # 触发连接创建
+            self.logger.info("数据库连接已手动打开")
+        except Exception as e:
+            self.logger.error(f"手动打开连接失败: {str(e)}")
+            raise
+
+    def close_connection(self) -> None:
+        """手动关闭数据库连接（外部控制）"""
+        if self.mysql_connection and not self.mysql_connection._closed:
+            self.mysql_connection.close()
+            self.logger.info("数据库连接已手动关闭")
+        else:
+            self.logger.debug("无活跃连接，无需关闭")
 
     def _split_artists(self, artists_str: str) -> List[str]:
         """分割歌手字符串（支持多种分隔符）"""
@@ -80,7 +101,7 @@ class MySQLChecker:
         return unique_artists
 
     def _get_mysql_connection(self) -> pymysql.connections.Connection:
-        """建立并返回MySQL连接"""
+        """建立并返回MySQL连接（内部使用，不直接暴露）"""
         if not self.mysql_config:
             raise ValueError("MySQL配置未初始化，无法建立连接")
 
@@ -103,16 +124,20 @@ class MySQLChecker:
 
     def check_song(self, song_name: str, artists_str: str) -> bool:
         """
-        检查歌曲是否存在（仅使用MySQL判断，若启用）
+        检查歌曲是否存在（依赖外部已打开的连接）
         
         Args:
             song_name: 歌曲名称
             artists_str: 歌手字符串（支持多种分隔符）
             
         Returns:
-            - 启用MySQL且存在非MP3格式: True
-            - 启用MySQL且不存在/存在但为MP3: False
+            - 存在非MP3格式: True
+            - 不存在/存在但为MP3: False
         """
+        # 检查连接状态
+        if not self.mysql_connection or self.mysql_connection._closed:
+            self.logger.error("无活跃数据库连接，请先调用open_connection()")
+            raise ConnectionError("数据库连接未打开或已关闭")
         
         if not song_name or not artists_str:
             self.logger.warning("歌曲名或歌手字符串为空，无法检查")
@@ -124,10 +149,8 @@ class MySQLChecker:
             self.logger.warning("分割后无有效歌手，无法检查")
             return False
         
-        connection = None
         try:
-            connection = self._get_mysql_connection()
-            with connection.cursor() as cursor:
+            with self.mysql_connection.cursor() as cursor:  # 复用已打开的连接
                 # 构建歌手IN条件（任意匹配）
                 artist_placeholders = ", ".join(["%s"] * len(artists))
                 sql = f"""
@@ -160,13 +183,9 @@ class MySQLChecker:
         except Exception as e:
             self.logger.error(f"歌曲检查过程出错: {str(e)}")
             return False
-        finally:
-            if connection and not connection._closed:
-                connection.close()
-                self.logger.debug("MySQL连接已关闭")
 
 
-# 使用示例
+# 批量检查示例（核心改进点）
 if __name__ == "__main__":
     # 初始化日志
     logging.basicConfig(
@@ -178,19 +197,28 @@ if __name__ == "__main__":
         # 加载配置
         config = Config("config.yaml")
         
-        # 初始化音乐检查器（使用MySQL）
-        music_checker = MySQLChecker(config)
+        # 初始化检查器
+        checker = MySQLChecker(config)
         
-        # 测试检查
+        # 批量检查场景：手动控制连接生命周期
         test_cases = [
             ("海阔天空", "Beyond"),
             ("北京欢迎你", "刘欢, 那英"),
-            ("千里之外", "周杰伦， 费玉清 / 群星")
+            ("千里之外", "周杰伦， 费玉清 / 群星"),
+            # 可添加更多歌曲...
         ]
         
+        # 1. 打开连接（一次打开，多次使用）
+        checker.open_connection()
+        
+        # 2. 批量检查（复用连接）
+        print("批量检查结果：")
         for song, artists in test_cases:
-            print(f"\n检查歌曲: {song} - {artists}")
-            print(f"存在且非MP3: {music_checker.check_song(song, artists)}")
+            result = checker.check_song(song, artists)
+            print(f"{song} - {artists}：{'存在且非MP3' if result else '不存在或为MP3'}")
+        
+        # 3. 全部检查完成后关闭连接
+        checker.close_connection()
             
     except Exception as e:
-        logging.error(f"示例执行失败: {str(e)}")
+        logging.error(f"执行失败: {str(e)}")
