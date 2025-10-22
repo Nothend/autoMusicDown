@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  netease-music-sync:
+    build: .
+    container_name: netease-music-sync
+    restart: always
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro  # 配置文件映射（只读）
+      - ./logs:/app/logs  # 日志目录映射
+      - ./downloads:/app/downloads  # 下载目录映射（主机目录可自定义）
+    environment:
+      - TZ=Asia/Shanghai  # 设置时区

@@ -1,0 +1,31 @@
+# 网易云配置
+cookie: your_cookie_here # 不用单引号或双引号
+uid: 123456  # 网易云用户ID
+
+# 日志级别
+LEVEL: "INFO"
+
+# 下载音乐的品质
+#     """音质等级枚举"""
+#     "standard"    # 标准
+#     "exhigh"      # 极高
+#     "lossless"    # 无损
+#     "hires"       # Hi-Res
+#     "sky"         # 沉浸环绕声
+#     "jyeffect"    # 高清环绕声
+#     "jymaster"    # 超清母带
+QUALITY_LEVEL: "lossless"
+
+
+# Navidrome配置
+NAVIDROME_HOST: "http://navidrome.example.com"
+NAVIDROME_USER: "username"
+NAVIDROME_PASS: "password"
+USE_NAVIDROME: false
+
+# Bark通知配置
+BARK_API: "https://api.day.app/your_key/"
+
+# 定时任务配置 (cron格式: 分 时 日 月 周)
+# 每天20:00-23:30之间每30分钟执行一次
+CRON_SCHEDULE: "0,30 20-23 * * *"
