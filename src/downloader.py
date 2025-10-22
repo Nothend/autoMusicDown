@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 import logging
+import os
 from pathlib import Path
 import re
 from typing import Dict, List, Any, Optional, Tuple
 import asyncio
-from urllib.parse import quote
 import aiohttp
 import aiofiles
 from io import BytesIO
@@ -73,9 +73,9 @@ class DownloadException(Exception):
 
 class SongDownloader:
     def __init__(self, cookies: Dict[str, str]):
-        self.download_dir = Path("/app/downloads") 
         self.logger = logging.getLogger(__name__)
-        self._init_download_dir()  # 初始化下载目录
+        self.download_dir = self._get_download_dir()
+        self._init_download_dir()
         self.parsedCookies=cookies
         # 初始化组件
         self.NeteaseApi = NeteaseMusic(self.parsedCookies)
@@ -86,16 +86,51 @@ class SongDownloader:
             'flac': AudioFormat.FLAC,
             'm4a': AudioFormat.M4A
         }
+
+    def _get_download_dir(self) -> Path:
+        """
+        计算下载目录路径：
+        - 本地开发（非Docker）：项目根目录/downloads（src的父目录下）
+        - Docker环境：/app/downloads（与卷映射一致）
+        """
+        # 定位src目录（当前文件所在目录，假设在src下）
+        src_dir = Path(__file__).resolve().parent
+        # 项目根目录 = src的父目录
+        project_root = src_dir.parent
+        # 下载目录 = 项目根目录/downloads
+        return project_root / "downloads"
         
     def _init_download_dir(self) -> None:
-        """初始化下载目录，确保目录存在"""
+        """初始化下载目录，确保存在（兼容本地和Docker环境）"""
         try:
-            self.download_dir.mkdir(exist_ok=True)
-            self.logger.info(f"下载目录初始化成功: {self.download_dir}")
-        except Exception as e:
-            self.logger.error(f"下载目录创建失败: {str(e)}")
+            # 递归创建目录（父目录不存在也会创建），已存在则不报错
+            self.download_dir.mkdir(exist_ok=True, parents=True)
+            
+            # 获取绝对路径，便于调试确认
+            abs_path = self.download_dir.resolve()
+            self.logger.info(f"下载目录初始化成功，绝对路径：{abs_path}")
+
+            # 环境识别（本地/ Docker）
+            if os.path.exists("/.dockerenv"):
+                # Docker环境：提示主机映射关系
+                self.logger.info(f"当前为Docker环境，主机映射路径：./downloads → 容器内路径：{abs_path}")
+            else:
+                # 本地环境：直接提示路径
+                self.logger.info(f"当前为本地环境，下载目录路径：{abs_path}")
+
+        except PermissionError:
+            self.logger.error(
+                f"无权限创建下载目录 {self.download_dir}！"
+                f"请检查项目根目录（{self.download_dir.parent}）的写入权限"
+            )
             raise
-    
+        except Exception as e:
+            self.logger.error(f"初始化下载目录失败：{str(e)}")
+            raise
+
+    def get_download_path(self, filename: str) -> Path:
+        """获取文件的完整下载路径"""
+        return self.download_dir / filename
     
     def _sanitize_filename(self, filename: str) -> str:
         """清理文件名，移除非法字符

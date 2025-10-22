@@ -5,6 +5,7 @@ env/
 # 本地日志和下载文件（通过volume映射，无需打包）
 logs/
 downloads/
+.vscode/
 
 # 其他临时文件
 __pycache__/
