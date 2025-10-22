@@ -30,10 +30,5 @@ RUN apk del gcc musl-dev \
 # 复制项目文件
 COPY . .
 
-
-
-# 设置配置文件、日志、下载目录为卷（可外部映射）
-VOLUME ["/app/config.yaml", "/app/logs", "/app/downloads"]
-
 # 运行程序
 CMD ["python", "-u", "src/main.py"]
