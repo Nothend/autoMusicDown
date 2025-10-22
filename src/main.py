@@ -86,8 +86,8 @@ class MusicSyncApp:
             
             # 1. 查找今日播放列表
             uid = self.config.get("uid")
-            # today = datetime.now().strftime("%Y%m%d")
-            today = '20251017'
+            today = datetime.now().strftime("%Y%m%d")
+            # today = '20251017'
             today_playlist = self.NeteaseApi.find_todays_playlist(uid,today)
             
             if not today_playlist:
