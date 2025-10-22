@@ -89,7 +89,7 @@ class NavidromeClient:
             self.logger.error(f"Navidrome 认证失败: {str(e)}")
             raise
     
-    def _navidrome_song_exists(self, title: str, artists: str, album: str) -> dict:
+    def navidrome_song_exists(self, title: str, artists: str, album: str) -> dict:
         """
         优化匹配逻辑：
         - 歌手名+歌曲名匹配，且格式不是MP3则存在；专辑名匹配不影响核心判定

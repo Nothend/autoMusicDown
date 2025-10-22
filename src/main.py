@@ -18,6 +18,7 @@ from bark import BarkNotifier
 from logger import setup_logger
 # 导入Cookie管理器
 from cookie_manager import CookieManager
+from mysql_check import MySQLChecker
 
 class APIResponse:
     """API响应工具类"""
@@ -63,13 +64,9 @@ class MusicSyncApp:
         self.quality_level = config.get("QUALITY_LEVEL", "lossless")
 
         # 初始化Navidrome客户端（如果启用）
-        self.navidrome = None
-        if config.get("USE_NAVIDROME", False):
-            self.navidrome = NavidromeClient(
-                config.get("NAVIDROME_HOST"),
-                config.get("NAVIDROME_USER"),
-                config.get("NAVIDROME_PASS")
-            )
+        self.use_navidrome = config.get("USE_NAVIDROME", False)
+        
+        self.use_mysql=config.get("USE_MYSQL", False)
         
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"下载目录已设置为: /app/downloads")
@@ -111,19 +108,31 @@ class MusicSyncApp:
             # 3. 筛选需要下载的歌曲
             songs_to_download = []
             
-            if self.navidrome and self.config.get("USE_NAVIDROME", False):
+            if self.use_navidrome:
                 self.logger.info("启用Navidrome检查，筛选不在库中的歌曲")
+                self.navidrome=NavidromeClient(self.config.get("NAVIDROME_HOST"),self.config.get("NAVIDROME_USER"),self.config.get("NAVIDROME_PASS"))
                 for song in songs:
                     title = song.get("name")
                     artists = song.get("artists", "")
                     album = song.get("album", {}).get("name", "")
                     
-                    exists = self.navidrome._navidrome_song_exists(title, artists, album)
+                    exists = self.navidrome.navidrome_song_exists(title, artists, album)
+                    if not exists.get("exists", False):
+                        songs_to_download.append(song)
+            elif self.use_mysql:
+                self.logger.info("启用MySQLe检查，筛选不在库中的歌曲")
+                self.mysql_checker=MySQLChecker(self.config)
+                for song in songs:
+                    title = song.get("name")
+                    artists = song.get("artists", "")
+                    album = song.get("album", {}).get("name", "")
+                    
+                    exists = self.mysql_checker.check_song(title, artists)
                     if not exists.get("exists", False):
                         songs_to_download.append(song)
             else:
-                self.logger.info("未启用Navidrome检查，所有歌曲都将被下载")
-                songs_to_download = songs
+                 self.logger.info("未启用任何检查")   
+        
             
             if not songs_to_download:
                 self.logger.info("没有需要下载的歌曲，任务结束")

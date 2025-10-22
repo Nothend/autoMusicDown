@@ -23,6 +23,19 @@ NAVIDROME_USER: "username"
 NAVIDROME_PASS: "password"
 USE_NAVIDROME: false
 
+# 数据库配置
+mysql:
+  # 服务器IP地址
+  host: 192.168.0.6 
+  # 端口号（默认MySQL端口为3306）
+  port: 3306
+  # 数据库用户名
+  user: root
+  # 数据库密码
+  password: password
+  # 数据库名称
+  database: music_tag
+USE_MYSQL: true
 # Bark通知配置
 BARK_API: "https://api.day.app/your_key/"
 
