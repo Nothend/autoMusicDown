@@ -14,7 +14,9 @@ RUN apk add --no-cache \
     libffi-dev \
     libyaml-dev \
     libmagic-dev \
-    && rm -rf /var/cache/apk/*  # 清理缓存，减小镜像体积
+    ca-certificates \
+    && rm -rf /var/cache/apk/* 
+
 # 创建日志目录和默认下载目录
 RUN mkdir -p /app/logs /app/downloads \
     && chmod 777 /app/logs /app/downloads

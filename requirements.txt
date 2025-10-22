@@ -1,8 +1,9 @@
 aiofiles==25.1.0
-aiohttp==3.12.15
+aiohttp==3.13.1
 APScheduler==3.11.0
 croniter==6.0.0
 cryptography==40.0.2
 mutagen==1.47.0
+pymysql==1.1.2
 PyYAML==6.0.3
 Requests==2.32.5
