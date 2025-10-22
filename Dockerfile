@@ -7,15 +7,15 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai
 
 # 安装所有必需的系统依赖
-RUN apk add --no-cache \
+RUN apk update && apk add --no-cache \
     gcc \
     musl-dev \
     openssl-dev \
     libffi-dev \
-    libyaml-dev \
-    libmagic-dev \
+    yaml-dev \
+    file-dev \
     ca-certificates \
-    && rm -rf /var/cache/apk/* 
+    && rm -rf /var/cache/apk/*
 
 # 创建日志目录和默认下载目录
 RUN mkdir -p /app/logs /app/downloads \
