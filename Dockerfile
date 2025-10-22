@@ -1,4 +1,4 @@
-FROM python:3.12.0-alpine3.19
+FROM python:3.12-alpine3.21
 
 # 设置工作目录
 WORKDIR /app
