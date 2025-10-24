@@ -6,7 +6,7 @@ services:
     container_name: auto-music-downloader
     restart: always
     volumes:
-      - ./config.yaml:/app/config.yaml:ro  # 配置文件映射（只读）
+      - ./config.yaml:/app/repo/config.yaml:ro    # 配置文件映射（只读）
       - ./logs:/app/logs  # 日志目录映射
       - ./downloads:/app/downloads  # 下载目录映射（主机目录可自定义）
     environment:
