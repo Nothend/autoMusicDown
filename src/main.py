@@ -187,10 +187,21 @@ def main():
         # 立即执行一次任务
         logger.info("执行同步任务")
         app.run_task()
+
+        # 任务执行完成后，添加优雅退出处理
+        logger.info("同步任务执行完毕，程序准备退出")
+        # 关闭日志系统，确保所有日志都已写入
+        logging.shutdown()
+        # 显式退出，返回成功状态码
+        exit(0)
         
     except Exception as e:
         print(f"程序启动失败: {str(e)}")
         logging.error(f"程序启动失败: {str(e)}", exc_info=True)
+        # 异常情况下也确保日志关闭
+        logging.shutdown()
+        # 返回错误状态码
+        exit(1)
 
 
 if __name__ == "__main__":
