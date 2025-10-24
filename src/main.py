@@ -152,7 +152,7 @@ class MusicSyncApp:
             
             if not songs_to_download:
                 self.logger.info("没有需要下载的歌曲，任务结束")
-                self.bark.send_notification("音乐同步", "没有需要下载的歌曲")
+                self.bark.send_notification("云音乐下载", "没有需要下载的歌曲")
                 return
             
             # 4. 下载歌曲
@@ -162,11 +162,11 @@ class MusicSyncApp:
             # 5. 发送报告
             self.bark.send_download_report(success_songs, failed_songs)
             
-            self.logger.info("音乐同步任务执行完成")
+            self.logger.info("音乐下载任务执行完成")
             
         except Exception as e:
             self.logger.error(f"任务执行出错: {str(e)}", exc_info=True)
-            self.bark.send_notification("音乐同步失败", f"执行任务时出错: {str(e)}")
+            self.bark.send_notification("云音乐下载失败", f"执行任务时出错: {str(e)}")
 
 
 def main():
