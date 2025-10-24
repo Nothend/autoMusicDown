@@ -868,17 +868,17 @@ class SongDownloader:
             if music_info.track_number > 0:
                 audio['TRACKNUMBER'] = str(music_info.track_number)
             
-            # 新增：发行时间（需要从音乐信息中获取publishTime）
+            # 处理发行时间标签（DATE: YYYY-MM-DD，YEAR: YYYY）
             if hasattr(music_info, 'publishTime') and music_info.publishTime:
-                full_date = music_info.publishTime
-                
-                # 单独写入年份（提高兼容性）
-                if '-' in full_date:
-                    audio['YEAR'] = full_date.split('-')[0]  # 提取YYYY部分
+                full_date = music_info.publishTime.strip()
+                # 校验是否为 YYYY-MM-DD 格式
+                if re.match(r'^\d{4}-\d{2}-\d{2}$', full_date):
+                    audio['DATE'] = full_date  # 完整日期
+                    audio['YEAR'] = full_date.split('-')[0]  # 提取年份
                 else:
-                    audio['YEAR'] = full_date  # 若本身就是年份格式
-                # 写入完整日期（标准DATE字段）
-                audio['DATE'] = full_date.split('-')[0]  # 提取YYYY部分
+                    self.logger.warning(f"publishTime格式错误（需YYYY-MM-DD），实际值: {full_date}，跳过日期标签")
+            else:
+                self.logger.debug("publishTime为空，跳过日期标签")
             # 新增：歌词标签（使用自定义字段存储歌词和翻译歌词）
             if music_info.lyric:
                 audio['LYRICS'] = music_info.lyric.strip()  # 原歌词
