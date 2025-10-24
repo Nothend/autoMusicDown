@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import hashlib
 from typing import Dict, List, Any, Optional, Tuple
 import asyncio
 import aiohttp
@@ -86,6 +87,9 @@ class SongDownloader:
             'flac': AudioFormat.FLAC,
             'm4a': AudioFormat.M4A
         }
+        
+        # 缓存已计算的文件哈希，提高效率
+        self.file_hash_cache = {}
 
     def _get_download_dir(self) -> Path:
         """
@@ -167,7 +171,7 @@ class SongDownloader:
         try:
             # 1. 处理11位时间戳（补全为13位毫秒级）
             if 10**10 <= timestamp_int < 10**11:  # 11位数字范围（10000000000 ~ 99999999999）
-                timestamp *= 100  # 转换为13位（如13053888000 → 1305388800000）
+                timestamp_int *= 100  # 转换为13位（如13053888000 → 1305388800000）
             
             # 2. 验证13位时间戳（毫秒级）
             if not (10**12 <= timestamp_int < 10**13):  # 13位数字范围（1000000000000 ~ 9999999999999）
@@ -304,6 +308,23 @@ class SongDownloader:
                     error_message="返回格式只支持 'file' 或 'json'"
                 )
             
+            # 检查是否已下载
+            if self.is_song_already_downloaded_by_id(music_id, quality):
+                self.logger.info(f"音乐ID {music_id} 已下载，跳过下载")
+                # 获取已下载文件信息并返回
+                music_info = self.get_music_info(music_id, quality)
+                filename = f"{music_info.artists} - {music_info.name}"
+                safe_filename = self._sanitize_filename(filename)
+                file_ext = self._determine_file_extension(music_info.download_url)
+                file_path = self.download_dir / f"{safe_filename}{file_ext}"
+                
+                return DownloadResult(
+                    success=True,
+                    file_path=str(file_path),
+                    file_size=file_path.stat().st_size if file_path.exists() else 0,
+                    music_info=music_info
+                )
+            
             # 获取音乐基本信息
             song_info = self.NeteaseApi.get_song_detail(music_id)
             if not song_info or 'songs' not in song_info or not song_info['songs']:
@@ -420,15 +441,175 @@ class SongDownloader:
         success_songs = []
         
         for song in songs:
-            sid=song.get("id")
-            if self.download_song(sid,quality):
-                success_songs.append(song)
+            sid = song.get("id")
+            if sid:
+                result = self.download_song(sid, quality)
+                if result.success:
+                    success_songs.append(song)
         
         self.logger.info(f"下载完成，成功 {len(success_songs)}/{len(songs)} 首")
         return success_songs
     
+    def is_song_already_downloaded(self, song: Dict[str, Any], quality: str) -> bool:
+        """
+        判断歌曲是否已下载
+        
+        Args:
+            song: 歌曲信息字典
+            quality: 音质等级
+            
+        Returns:
+            是否已下载
+        """
+        try:
+            # 提取歌曲基本信息
+            song_id = song.get("id")
+            if not song_id:
+                return False
+                
+            # 通过ID检查
+            return self.is_song_already_downloaded_by_id(song_id, quality)
+            
+        except Exception as e:
+            self.logger.error(f"检查歌曲是否已下载时出错: {str(e)}")
+            return False
     
-
+    def is_song_already_downloaded_by_id(self, song_id: int, quality: str) -> bool:
+        """
+        通过歌曲ID判断是否已下载
+        
+        Args:
+            song_id: 歌曲ID
+            quality: 音质等级
+            
+        Returns:
+            是否已下载
+        """
+        try:
+            # 获取音乐信息
+            music_info = self.get_music_info(song_id, quality)
+            
+            # 生成可能的文件名
+            base_filename = f"{music_info.artists} - {music_info.name}"
+            safe_filename = self._sanitize_filename(base_filename)
+            
+            # 可能的文件扩展名
+            possible_extensions = ['.mp3', '.flac', '.m4a']
+            
+            # 检查所有可能的文件
+            for ext in possible_extensions:
+                file_path = self.download_dir / f"{safe_filename}{ext}"
+                if file_path.exists():
+                    # 文件名匹配，进一步检查文件大小或哈希
+                    if self._verify_file_integrity(file_path, music_info):
+                        self.logger.info(f"已找到匹配的歌曲文件: {file_path.name}")
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"通过ID检查歌曲是否已下载时出错: {str(e)}")
+            return False
+    
+    def _verify_file_integrity(self, file_path: Path, music_info: MusicInfo) -> bool:
+        """
+        验证文件完整性，先检查文件大小，差异较小时再检查哈希
+        
+        Args:
+            file_path: 文件路径
+            music_info: 音乐信息
+            
+        Returns:
+            文件是否匹配
+        """
+        try:
+            # 检查文件大小（允许1%的误差）
+            file_size = file_path.stat().st_size
+            expected_size = music_info.file_size
+            
+            if expected_size > 0:
+                size_diff_ratio = abs(file_size - expected_size) / expected_size
+                if size_diff_ratio < 0.01:  # 大小差异小于1%
+                    return True
+                # 如果大小差异较大，尝试哈希验证（针对可能的不同音质版本）
+                return self._compare_file_hash(file_path, music_info)
+            
+            # 如果没有预期大小，直接使用哈希验证
+            return self._compare_file_hash(file_path, music_info)
+            
+        except Exception as e:
+            self.logger.warning(f"验证文件完整性时出错: {str(e)}")
+            return False
+    
+    def _compare_file_hash(self, file_path: Path, music_info: MusicInfo) -> bool:
+        """
+        比较文件哈希值，使用缓存提高效率
+        
+        Args:
+            file_path: 文件路径
+            music_info: 音乐信息
+            
+        Returns:
+            哈希是否匹配
+        """
+        try:
+            # 检查缓存
+            if file_path in self.file_hash_cache:
+                file_hash = self.file_hash_cache[file_path]
+            else:
+                # 计算文件哈希（只计算前1MB和后1MB，提高效率）
+                file_hash = self._calculate_file_hash(file_path)
+                self.file_hash_cache[file_path] = file_hash
+            
+            # 计算期望哈希（基于音乐信息）
+            expected_hash = self._calculate_expected_hash(music_info)
+            
+            return file_hash == expected_hash
+            
+        except Exception as e:
+            self.logger.warning(f"比较文件哈希时出错: {str(e)}")
+            return False
+    
+    def _calculate_file_hash(self, file_path: Path) -> str:
+        """
+        计算文件哈希，只读取部分内容以提高效率
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            哈希值字符串
+        """
+        hash_obj = hashlib.md5()
+        file_size = file_path.stat().st_size
+        
+        with open(file_path, 'rb') as f:
+            # 读取前1MB
+            hash_obj.update(f.read(1024 * 1024))
+            
+            # 如果文件大于2MB，再读取最后1MB
+            if file_size > 2 * 1024 * 1024:
+                f.seek(-1024 * 1024, os.SEEK_END)
+                hash_obj.update(f.read(1024 * 1024))
+        
+        return hash_obj.hexdigest()
+    
+    def _calculate_expected_hash(self, music_info: MusicInfo) -> str:
+        """
+        基于音乐信息计算期望的哈希值
+        
+        Args:
+            music_info: 音乐信息
+            
+        Returns:
+            期望的哈希值字符串
+        """
+        hash_obj = hashlib.md5()
+        # 使用关键信息计算哈希
+        hash_str = f"{music_info.id}_{music_info.name}_{music_info.artists}_{music_info.album}_{music_info.duration}"
+        hash_obj.update(hash_str.encode('utf-8'))
+        return hash_obj.hexdigest()
+    
     def download_music_file(self, music_id: int, quality: str = "standard") -> DownloadResult:
         """下载音乐文件到本地
         
@@ -472,6 +653,9 @@ class SongDownloader:
             
             # 写入音乐标签
             self._write_music_tags(file_path, music_info)
+            
+            # 添加到哈希缓存
+            self.file_hash_cache[file_path] = self._calculate_file_hash(file_path)
             
             return DownloadResult(
                 success=True,
@@ -536,6 +720,9 @@ class SongDownloader:
             # 写入音乐标签
             self._write_music_tags(file_path, music_info)
             
+            # 添加到哈希缓存
+            self.file_hash_cache[file_path] = self._calculate_file_hash(file_path)
+            
             return DownloadResult(
                 success=True,
                 file_path=str(file_path),
@@ -599,7 +786,8 @@ class SongDownloader:
         Returns:
             下载结果列表
         """
-        semaphore = asyncio.Semaphore(self.max_concurrent)
+        max_concurrent = 5  # 设置最大并发数
+        semaphore = asyncio.Semaphore(max_concurrent)
         
         async def download_with_semaphore(music_id: int) -> DownloadResult:
             async with semaphore:
@@ -621,8 +809,6 @@ class SongDownloader:
         
         return processed_results
     
-    
-
     def _write_music_tags(self, file_path: Path, music_info: MusicInfo) -> None:
         """写入音乐标签信息
         
@@ -688,7 +874,6 @@ class SongDownloader:
                 audio['TRACKNUMBER'] = str(music_info.track_number)
             
             # 新增：发行时间（需要从音乐信息中获取publishTime）
-            # 注意：需要确保music_info中包含publishTime字段（后续需在MusicInfo类中添加）
             if hasattr(music_info, 'publishTime') and music_info.publishTime:
                 full_date = music_info.publishTime
                 
@@ -750,10 +935,6 @@ class SongDownloader:
         except Exception as e:
             print(f"写入M4A标签失败: {e}")
 
-    
-
-    
-
     def get_download_progress(self, music_id: int, quality: str = "standard") -> Dict[str, Any]:
         """获取下载进度信息
         
@@ -801,4 +982,3 @@ class SongDownloader:
                 'progress': 0,
                 'completed': False
             }
-
