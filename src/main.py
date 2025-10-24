@@ -91,7 +91,7 @@ class MusicSyncApp:
 
             if is_debug:
                 # 调试时使用固定日期
-                today = '20251017'
+                today = '20251024'
             else:
                 # 运行时使用当前日期
                 today = datetime.now().strftime("%Y%m%d")
@@ -118,7 +118,7 @@ class MusicSyncApp:
             
             if self.use_navidrome:
                 self.logger.info("启用Navidrome检查，筛选不在库中的歌曲")
-                self.navidrome=NavidromeClient(self.config.get("NAVIDROME_HOST"),self.config.get("NAVIDROME_USER"),self.config.get("NAVIDROME_PASS"))
+                self.navidrome=NavidromeClient(self.config.get_nested("NAVIDROME.NAVIDROME_HOST"),self.config.get_nested("NAVIDROME.NAVIDROME_USER"),self.config.get_nested("NAVIDROME.NAVIDROME_PASS"))
                 for song in songs:
                     title = song.get("name")
                     artists = song.get("artists", "")
