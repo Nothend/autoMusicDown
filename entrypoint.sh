@@ -81,4 +81,4 @@ echo "$CRON_JOBS" | crontab -
 # 启动 cron 服务
 echo "启动定时任务服务..."
 # 启动 cronie 服务，保持前台运行
-crond -n > /var/log/cron/crond.log 2>&1
+crond -n
