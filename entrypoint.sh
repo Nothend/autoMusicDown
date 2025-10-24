@@ -79,4 +79,5 @@ echo "$CRON_JOBS" | crontab -
 
 # 启动 cron 服务
 echo "启动定时任务服务..."
-crond -f -l 8  # -f 前台运行，-l 8 日志级别
+# 启动 cronie 服务，保持前台运行
+crond -f -l 8
