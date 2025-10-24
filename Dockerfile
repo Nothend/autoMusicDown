@@ -17,8 +17,7 @@ RUN apk update && apk add --no-cache \
     git \          
     dcron  \       
     && rm -rf /var/cache/apk/*
-# 用于克隆代码库
- # 用于定时任务
+
 # 创建必要目录（含 cron 日志目录）
 RUN mkdir -p /app/logs /app/downloads /var/log/cron \
     && chmod 777 /app/logs /app/downloads /var/log/cron
