@@ -92,17 +92,8 @@ class SongDownloader:
         self.file_hash_cache = {}
 
     def _get_download_dir(self) -> Path:
-        """
-        计算下载目录路径：
-        - 本地开发（非Docker）：项目根目录/downloads（src的父目录下）
-        - Docker环境：/app/downloads（与卷映射一致）
-        """
-        # 定位src目录（当前文件所在目录，假设在src下）
-        src_dir = Path(__file__).resolve().parent
-        # 项目根目录 = src的父目录
-        project_root = src_dir.parent
-        # 下载目录 = 项目根目录/downloads
-        return project_root / "downloads"
+        """强制使用与docker-compose映射一致的下载目录：/app/downloads"""
+        return Path("/app/downloads")
         
     def _init_download_dir(self) -> None:
         """初始化下载目录，确保存在（兼容本地和Docker环境）"""
