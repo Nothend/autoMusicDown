@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime
+import sys
 from typing import Optional
 
 def setup_logger(level: int = logging.INFO) -> logging.Logger:
@@ -27,7 +28,7 @@ def setup_logger(level: int = logging.INFO) -> logging.Logger:
     )
     
     # 5. 控制台处理器（确保输出到stdout，兼容终端）
-    console_handler = logging.StreamHandler()
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     console_handler.setLevel(level)  # 显式设置级别，与根日志一致
     

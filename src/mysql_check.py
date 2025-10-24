@@ -188,10 +188,7 @@ class MySQLChecker:
 # 批量检查示例（核心改进点）
 if __name__ == "__main__":
     # 初始化日志
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    #logging.basicConfig(level=logging.DEBUG,format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     
     try:
         # 加载配置

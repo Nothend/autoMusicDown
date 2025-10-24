@@ -214,9 +214,9 @@ class CookieManager:
 
 if __name__ == "__main__":
     # 测试代码
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    #logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
-    manager = CookieManager()
+    #manager = CookieManager()
     
     print("Cookie管理器模块")
     print("支持的功能:")
@@ -227,6 +227,6 @@ if __name__ == "__main__":
     print("- Cookie信息查看")
     
     # 显示当前Cookie信息
-    info = manager.get_cookie_info()
-    print(f"\n当前Cookie状态: {manager}")
-    print(f"详细信息: {info}")
+    #info = manager.get_cookie_info()
+    #print(f"\n当前Cookie状态: {manager}")
+    #print(f"详细信息: {info}")

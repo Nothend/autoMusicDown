@@ -69,6 +69,7 @@ class MusicSyncApp:
          # 设置日志
         
         self.logger = logging.getLogger(__name__)
+        print(f"日志器{self.logger.name}的propagate属性：{self.logger.propagate}")  # 应输出True
         self.logger.info(f"下载目录已设置为: /app/downloads")
         self.logger.info(f"下载音乐品质已设置为: { {"standard": "标准", "exhigh": "极高", "lossless": "无损", "hires": "Hi-Res", "sky": "沉浸环绕声", "jyeffect": "高清环绕声", "jymaster": "超清母带"}.get (self.quality_level, "未知品质")}")
     
