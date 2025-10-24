@@ -18,15 +18,19 @@ QUALITY_LEVEL: "lossless"
 
 
 # Navidrome配置
-NAVIDROME_HOST: "http://navidrome.example.com"
-NAVIDROME_USER: "username"
-NAVIDROME_PASS: "password"
-USE_NAVIDROME: false
+NAVIDROME:
+  NAVIDROME_HOST: "http://192.168.0.6:4533"
+  NAVIDROME_USER: "admin"
+  NAVIDROME_PASS: "admin"
+  # 是否开启 Navidrome 检查
+  USE_NAVIDROME: true
 
-# 数据库配置
+# music-tag-web
 mysql:
+  # 是否检查music-tag-web使用的MySQL数据库
+  USE_MYSQL: false
   # 服务器IP地址
-  host: 192.168.0.6 
+  host: 192.168.0.6
   # 端口号（默认MySQL端口为3306）
   port: 3306
   # 数据库用户名
@@ -35,7 +39,6 @@ mysql:
   password: password
   # 数据库名称
   database: music_tag
-USE_MYSQL: true
 # Bark通知配置
 BARK_API: "https://api.day.app/your_key/"
 

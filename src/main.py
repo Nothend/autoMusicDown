@@ -65,9 +65,10 @@ class MusicSyncApp:
         self.quality_level = config.get("QUALITY_LEVEL", "lossless")
 
         # 初始化Navidrome客户端（如果启用）
-        self.use_navidrome = config.get("USE_NAVIDROME", False)
+        self.use_navidrome = config.is_enabled("NAVIDROME")
+        self.use_mysql = config.is_enabled("MYSQL")
         
-        self.use_mysql=config.get("USE_MYSQL", False)
+         # 设置日志
         
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"下载目录已设置为: /app/downloads")
