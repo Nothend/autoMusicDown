@@ -15,7 +15,7 @@ RUN apk update && apk add --no-cache \
     file-dev \
     ca-certificates \
     git \          
-    cron \       
+    dcron  \       
     && rm -rf /var/cache/apk/*
 # 用于克隆代码库
  # 用于定时任务
