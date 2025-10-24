@@ -52,7 +52,8 @@ RUN apk update && apk add --no-cache \
 
 # 创建必要目录
 RUN mkdir -p /app/logs /app/downloads /app/repo /var/log/cron \
-    && chmod 777 /app/logs /app/downloads /app/repo /var/log/cron
+    && chmod 777 /app/logs /app/downloads /app/repo /var/log/cron \
+    && chmod 755 /root/.cache /root/.cache/crontab  # 给缓存目录正确权限
 
 # 从构建阶段复制依赖
 COPY --from=builder /app/deps /usr/local/lib/python3.12/site-packages/

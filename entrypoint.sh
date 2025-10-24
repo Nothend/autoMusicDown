@@ -15,36 +15,37 @@ if [ -z "$CRON_SCHEDULE" ]; then
     exit 1
 fi
 
-# 将拉取逻辑写成独立脚本（而非函数），确保cron可调用
-cat > /usr/local/bin/pull_and_update << 'EOF'
+# 将拉取逻辑写成独立脚本（用 EOF 而非 'EOF'，允许变量展开）
+cat > /usr/local/bin/pull_and_update << EOF  # 关键：去掉单引号
 #!/bin/sh
 set -e
 
 REPO_DIR="/app/repo"
 TEMP_REPO_DIR="/app/repo_temp"
+REPO_URL="$REPO_URL"  # 传入环境变量中的仓库地址
 
-echo "开始拉取最新代码..."
+echo "开始拉取最新代码（仓库地址：\$REPO_URL）..."  # 调试用，可保留
 
-# 首次启动：用临时目录克隆（避开挂载的config.yaml）
-if [ ! -d "$REPO_DIR/.git" ]; then
+# 首次启动：用临时目录克隆
+if [ ! -d "\$REPO_DIR/.git" ]; then
     echo "首次启动，用临时目录克隆仓库..."
-    rm -rf "$TEMP_REPO_DIR"
-    mkdir -p "$TEMP_REPO_DIR"
-    git clone "$REPO_URL" "$TEMP_REPO_DIR" || { echo "克隆仓库失败"; exit 1; }
+    rm -rf "\$TEMP_REPO_DIR"
+    mkdir -p "\$TEMP_REPO_DIR"
+    git clone "\$REPO_URL" "\$TEMP_REPO_DIR" || { echo "克隆仓库失败（地址：\$REPO_URL）"; exit 1; }
 
-    mkdir -p "$REPO_DIR"
-    cp -r "$TEMP_REPO_DIR"/* "$REPO_DIR/" 2>/dev/null || true
-    cp -r "$TEMP_REPO_DIR"/.git "$REPO_DIR/"
-    rm -rf "$TEMP_REPO_DIR"
+    mkdir -p "\$REPO_DIR"
+    cp -r "\$TEMP_REPO_DIR"/* "\$REPO_DIR/" 2>/dev/null || true
+    cp -r "\$TEMP_REPO_DIR"/.git "\$REPO_DIR/"
+    rm -rf "\$TEMP_REPO_DIR"
 else
-    # 非首次启动：直接拉取更新
+    # 非首次启动：拉取更新
     echo "非首次启动，拉取更新..."
-    cd "$REPO_DIR" || exit 1
+    cd "\$REPO_DIR" || exit 1
     git pull || { echo "拉取代码失败"; exit 1; }
 fi
 
 # 安装依赖
-cd "$REPO_DIR" || exit 1
+cd "\$REPO_DIR" || exit 1
 if [ -f "requirements.txt" ]; then
     echo "安装依赖..."
     pip install --no-cache-dir -r requirements.txt || { echo "依赖安装失败"; exit 1; }
