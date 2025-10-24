@@ -48,7 +48,7 @@ fi
 cd "\$REPO_DIR" || exit 1
 if [ -f "requirements.txt" ]; then
     echo "安装依赖..."
-    pip install --no-cache-dir -r requirements.txt || { echo "依赖安装失败"; exit 1; }
+    python -m pip install --no-cache-dir -r requirements.txt || { echo "依赖安装失败"; exit 1; }
 fi
 
 echo "代码拉取和依赖更新完成"
@@ -68,7 +68,7 @@ echo "配置程序执行定时任务：$CRON_SCHEDULE"
 # 生成 crontab 配置（注意：时间表达式和命令之间无引号，调用独立脚本）
 CRON_JOBS=$(cat <<EOF
 # 定时拉取代码（调用独立脚本，而非函数）
-$PULL_CRON /usr/local/bin/pull_and_update >> /var/log/cron/pull.log 2>&1
+$PULL_CRON /usr/local/bin/pull_and_update >>  /app/logs/pull.log 2>&1
 
 # 定时执行主程序
 $CRON_SCHEDULE /usr/local/bin/python -u $REPO_DIR/src/main.py >> /app/logs/main.log 2>&1
