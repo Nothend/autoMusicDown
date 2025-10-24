@@ -16,10 +16,21 @@ pull_and_update() {
     echo "开始拉取最新代码..."
     cd /app || exit 1  # 确保在工作目录
 
-    # 首次启动克隆仓库，后续拉取更新
+    # 首次启动克隆仓库（处理非空目录问题）
     if [ ! -d ".git" ]; then
+        echo "首次启动，清理非必要文件后克隆仓库..."
+        # 保留 logs、downloads 目录（卷挂载相关，不可删除），删除其他文件/目录
+        for item in /app/*; do
+            # 排除需要保留的目录
+            if [ "$(basename "$item")" != "logs" ] && [ "$(basename "$item")" != "downloads" ]; then
+                echo "删除冲突文件/目录: $item"
+                rm -rf "$item"
+            fi
+        done
+        # 此时 /app 目录除了 logs、downloads 外为空，可安全克隆
         git clone "$REPO_URL" . || { echo "克隆仓库失败"; exit 1; }
     else
+        # 非首次启动，直接拉取更新
         git pull || { echo "拉取代码失败"; exit 1; }
     fi
 
