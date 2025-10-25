@@ -68,7 +68,7 @@ pull_and_update
 
 # 配置定时任务（修正语法：去掉多余引号，调用独立脚本）
 PULL_CRON=${PULL_CRON:-"0 18 * * *"}  # 默认定时拉取：每天18点
-PULL_CRON=${CRON_SCHEDULE:-"0 20-23,0 * * *"}  # 默认定时运行：每天20-23点及0点，每小时一次
+CRON_SCHEDULE=${CRON_SCHEDULE:-"0 20-23,0 * * *"}  # 默认定时运行：每天20-23点及0点，每小时一次
 echo "[$(log_time)] 配置代码拉取定时任务：$PULL_CRON"
 echo "[$(log_time)] 配置程序执行定时任务：$CRON_SCHEDULE"
 
