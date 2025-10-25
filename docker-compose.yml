@@ -13,4 +13,4 @@ services:
       - TZ=Asia/Shanghai  # 设置时区
       - REPO_URL=https://github.com/Nothend/autoMusicDown.git  # 公共仓库地址
       - CRON_SCHEDULE=0 20-23,0 * * *    # 执行main.py：每天20-23点及0点，每小时一次
-      # - PULL_CRON=0 18 * * *           # 可选：自定义拉取时间（默认已设为每天18点，可省略）
+      - PULL_CRON=0 18 * * *           # 可选：自定义拉取时间（默认已设为每天18点，可省略）
