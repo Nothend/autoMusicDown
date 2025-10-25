@@ -5,6 +5,58 @@ set -e  # 遇到错误立即退出
 REPO_DIR="/app/repo"
 TEMP_REPO_DIR="/app/repo_temp"  # 临时目录（无挂载，确保空）
 
+# 校验cron表达式格式的函数
+validate_cron() {
+    local cron_expr="$1"
+    # cron表达式基本格式：5个字段（分钟 小时 日期 月份 星期），允许空格分隔
+    # 简化校验：至少5个字段，每个字段符合基本规则（不严格校验边界，兼顾灵活性）
+    if ! echo "$cron_expr" | grep -qE '^[0-9*\/,-]+[[:space:]]+[0-9*\/,-]+[[:space:]]+[0-9*\/,-]+[[:space:]]+[0-9*\/,-]+[[:space:]]+[0-9*\/,-]+$'; then
+        echo "无效的cron表达式格式：$cron_expr"
+        echo "正确格式示例：0 18 * * *（5个字段，空格分隔，支持* / , -）"
+        return 1
+    fi
+
+    # 拆分字段验证范围（基础校验，兼顾特殊字符）
+    local fields=($cron_expr)
+    local min="${fields[0]}"
+    local hour="${fields[1]}"
+    local dom="${fields[2]}"
+    local month="${fields[3]}"
+    local dow="${fields[4]}"
+
+    # 验证分钟（0-59或特殊字符）
+    if ! echo "$min" | grep -qE '^(\*|[0-5]?[0-9](-[0-5]?[0-9])?(\/[0-9]+)?(,[0-5]?[0-9](-[0-5]?[0-9])?(\/[0-9]+)?)*)$'; then
+        echo "分钟字段无效：$min（范围0-59，支持* / , -）"
+        return 1
+    fi
+
+    # 验证小时（0-23或特殊字符）
+    if ! echo "$hour" | grep -qE '^(\*|[01]?[0-9]|2[0-3](-[01]?[0-9]|2[0-3])?(\/[0-9]+)?(,[01]?[0-9]|2[0-3](-[01]?[0-9]|2[0-3])?(\/[0-9]+)?)*)$'; then
+        echo "小时字段无效：$hour（范围0-23，支持* / , -）"
+        return 1
+    fi
+
+    # 验证日期（1-31或特殊字符，简化校验）
+    if ! echo "$dom" | grep -qE '^(\*|[1-9]|[12][0-9]|3[01](-[1-9]|[12][0-9]|3[01])?(\/[0-9]+)?(,[1-9]|[12][0-9]|3[01](-[1-9]|[12][0-9]|3[01])?(\/[0-9]+)?)*)$'; then
+        echo "日期字段无效：$dom（范围1-31，支持* / , -）"
+        return 1
+    fi
+
+    # 验证月份（1-12或特殊字符，简化校验）
+    if ! echo "$month" | grep -qE '^(\*|[1-9]|1[0-2](-[1-9]|1[0-2])?(\/[0-9]+)?(,[1-9]|1[0-2](-[1-9]|1[0-2])?(\/[0-9]+)?)*)$'; then
+        echo "月份字段无效：$month（范围1-12，支持* / , -）"
+        return 1
+    fi
+
+    # 验证星期（0-6或特殊字符，0/7为周日，简化校验）
+    if ! echo "$dow" | grep -qE '^(\*|[0-6](-[0-6])?(\/[0-9]+)?(,[0-6](-[0-6])?(\/[0-9]+)?)*)$'; then
+        echo "星期字段无效：$dow（范围0-6，支持* / , -）"
+        return 1
+    fi
+
+    return 0
+}
+
 # 检查必要环境变量
 if [ -z "$REPO_URL" ]; then
     echo "错误：未设置 REPO_URL 环境变量（仓库地址）"
@@ -12,6 +64,18 @@ if [ -z "$REPO_URL" ]; then
 fi
 if [ -z "$CRON_SCHEDULE" ]; then
     echo "错误：未设置 CRON_SCHEDULE 环境变量（执行任务的cron表达式）"
+    exit 1
+fi
+
+# 验证CRON_SCHEDULE格式
+if ! validate_cron "$CRON_SCHEDULE"; then
+    echo "错误：CRON_SCHEDULE 格式无效"
+    exit 1
+fi
+# 处理PULL_CRON默认值并验证格式
+PULL_CRON=${PULL_CRON:-"0 18 * * *"}  # 默认定时拉取：每天18点
+if ! validate_cron "$PULL_CRON"; then
+    echo "错误：PULL_CRON 格式无效"
     exit 1
 fi
 
