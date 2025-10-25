@@ -107,15 +107,18 @@ class MusicSyncApp:
             playlist_id = today_playlist.get("id")
             playlist_detail = self.NeteaseApi.get_playlist_detail(playlist_id, self.NeteaseApi.cookies)
             songs = playlist_detail.get("tracks", [])
-            
+            total_songs = len(songs)  # 统计1：歌单总歌曲数
             if not songs:
                 self.logger.info("播放列表中没有歌曲，任务结束")
+                self.bark.send_notification("云音乐同步", "播放列表中没有歌曲")
                 return
             
             self.logger.info(f"找到 {len(songs)} 首歌曲需要处理")
             
             # 3. 筛选需要下载的歌曲
             songs_to_download = []
+            library_exists_count = 0  # 统计2：库中已存在的歌曲数（Navidrome/MySQL）
+            local_exists_count = 0    # 统计3：本地已下载的歌曲数
             
             if self.use_navidrome:
                 self.logger.info("启用Navidrome检查，筛选不在库中的歌曲")
@@ -126,9 +129,13 @@ class MusicSyncApp:
                     album = song.get("album", "")
                     
                     exists = self.navidrome.navidrome_song_exists(title, artists, album)
-                    if not exists.get("exists", False):
-                        # 检查本地是否已下载
-                        if not self.downloader.is_song_already_downloaded(song, self.quality_level):
+                    if exists.get("exists", False):
+                        library_exists_count += 1
+                    else:
+                        # 库中不存在，检查本地是否已下载
+                        if self.downloader.is_song_already_downloaded(song, self.quality_level):
+                            local_exists_count += 1
+                        else:
                             songs_to_download.append(song)
             elif self.use_mysql:
                 self.logger.info("启用MySQLe检查，筛选不在库中的歌曲")
@@ -140,17 +147,37 @@ class MusicSyncApp:
                     album = song.get("album", "")
                     
                     exists = self.mysql_checker.check_song(title, artists)
-                    if not exists:
-                        # 检查本地是否已下载
-                        if not self.downloader.is_song_already_downloaded(song, self.quality_level):
+                    if exists:
+                        library_exists_count += 1
+                    else:
+                        # 库中不存在，检查本地是否已下载
+                        if self.downloader.is_song_already_downloaded(song, self.quality_level):
+                            local_exists_count += 1
+                        else:
                             songs_to_download.append(song)
                 self.mysql_checker.close_connection()
             else:
                 self.logger.info("未启用任何检查，仅检查本地是否已下载")
                 for song in songs:
-                    if not self.downloader.is_song_already_downloaded(song, self.quality_level):
+                    if self.downloader.is_song_already_downloaded(song, self.quality_level):
+                        local_exists_count += 1  # 本地已存在
+                    else:
                         songs_to_download.append(song)
-            
+            # 统计4：应下载的歌曲数
+            should_download = len(songs_to_download)
+            # 发送【筛选阶段】统计通知
+            self.bark.send_download_report(
+                total_songs=total_songs,
+                library_exists=library_exists_count,
+                local_exists=local_exists_count,
+                should_download=should_download
+            )
+            # 日志输出筛选统计
+            self.logger.info(
+                f"筛选完成：\n"
+                f"歌单总数：{total_songs}首 | 库中已存在：{library_exists_count}首\n"
+                f"本地已存在：{local_exists_count}首 | 应下载：{should_download}首"
+            )
             if not songs_to_download:
                 self.logger.info("没有需要下载的歌曲，任务结束")
                 self.bark.send_notification("云音乐下载", "没有需要下载的歌曲")
@@ -158,12 +185,23 @@ class MusicSyncApp:
             
             # 4. 下载歌曲
             success_songs = self.downloader.download_songs(songs_to_download,self.quality_level)
-            failed_songs = [s for s in songs_to_download if s not in success_songs]
+            success_count = len(success_songs)
+            failed_count = should_download - success_count  # 应下载 - 成功 = 失败
             
-            # 5. 发送报告
-            self.bark.send_download_report(success_songs, failed_songs)
+            # 发送【下载阶段】结果通知
+            self.bark.send_download_result(
+                success=success_count,
+                failed=failed_count,
+                total=should_download
+            )
             
-            self.logger.info("音乐下载任务执行完成")
+            # 日志输出下载结果
+            self.logger.info(
+                f"下载完成：\n"
+                f"应下载：{should_download}首 | 成功：{success_count}首 | 失败：{failed_count}首"
+            )
+            
+            self.logger.info("音乐同步任务执行完毕")
             
         except Exception as e:
             self.logger.error(f"任务执行出错: {str(e)}", exc_info=True)
