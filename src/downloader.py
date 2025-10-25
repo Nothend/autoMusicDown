@@ -240,6 +240,7 @@ class SongDownloader:
             
             song_detail = detail_result['songs'][0]
 
+            # 获取专辑详情以提取更准确的发行时间
             alum_id=song_detail['al']['id'] if song_detail and 'al' in song_detail and song_detail['al'] else None
             alum_info = self.NeteaseApi.get_album_detail(alum_id,self.parsedCookies) if alum_id else None
             alum_publisTime=''
