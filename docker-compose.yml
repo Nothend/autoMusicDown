@@ -11,6 +11,6 @@ services:
       - ./downloads:/app/downloads  # 下载目录映射（主机目录可自定义）
     environment:
       - TZ=Asia/Shanghai  # 设置时区
-      - REPO_URL=https://github.com/你的用户名/你的仓库名.git  # 公共仓库地址
+      - REPO_URL=https://github.com/Nothend/autoMusicDown.git  # 公共仓库地址
       - CRON_SCHEDULE=0 20-23,0 * * *    # 执行main.py：每天20-23点及0点，每小时一次
       # - PULL_CRON=0 18 * * *           # 可选：自定义拉取时间（默认已设为每天18点，可省略）
