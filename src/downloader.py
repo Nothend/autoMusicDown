@@ -239,6 +239,13 @@ class SongDownloader:
                 raise DownloadException(f"无法获取音乐ID {music_id} 的详细信息")
             
             song_detail = detail_result['songs'][0]
+
+            alum_id=song_detail['al']['id'] if song_detail and 'al' in song_detail and song_detail['al'] else None
+            alum_info = self.NeteaseApi.get_album_detail(alum_id,self.parsedCookies) if alum_id else None
+            alum_publisTime=''
+            if alum_info and 'publishTime' in alum_info:
+                alum_publisTime = alum_info.get('publishTime', song_detail['al'].get('publishTime',0))
+            
             
             # 获取歌词
             lyric_result = self.NeteaseApi.get_lyric(music_id, self.parsedCookies)
@@ -249,7 +256,7 @@ class SongDownloader:
             artists = '/'.join(artist['name'] for artist in song_detail.get('ar', []))
             # 提取发行时间（处理13位/11位时间戳）
             # 网易云API的album.publishTime为13位毫秒级时间戳
-            publish_timestamp = song_detail.get('publishTime', '2025')
+            publish_timestamp = alum_publisTime
             # 转换为年月日格式（调用工具函数）
             publish_time = self._timestamp_str_to_date(publish_timestamp)
             # 创建MusicInfo对象
@@ -322,6 +329,7 @@ class SongDownloader:
             
             # 获取音乐基本信息
             song_info = self.NeteaseApi.get_song_detail(music_id)
+            
             if not song_info or 'songs' not in song_info or not song_info['songs']:
                 return DownloadResult(
                     success=False,
@@ -618,7 +626,7 @@ class SongDownloader:
         try:
             # 获取音乐信息
             music_info = self.get_music_info(music_id, quality)
-            
+
             # 生成文件名
             filename = f"{music_info.artists} - {music_info.name}"
             safe_filename = self._sanitize_filename(filename)

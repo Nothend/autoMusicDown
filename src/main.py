@@ -92,7 +92,7 @@ class MusicSyncApp:
 
             if is_debug:
                 # 调试时使用固定日期
-                today = '20251025'
+                today = '20251017'
             else:
                 # 运行时使用当前日期
                 today = datetime.now().strftime("%Y%m%d")
