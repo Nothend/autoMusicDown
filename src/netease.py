@@ -338,6 +338,60 @@ class NeteaseMusic:
         except (json.JSONDecodeError, KeyError) as e:
             raise APIException(f"解析歌单详情响应失败: {e}")
     
+    def get_album_detail(self, album_id: int, cookies: Dict[str, str]) -> Dict[str, Any]:
+        """获取专辑详情
+        
+        Args:
+            album_id: 专辑ID
+            cookies: 用户cookies
+            
+        Returns:
+            专辑详情信息
+            
+        Raises:
+            APIException: API调用失败时抛出
+        """
+        try:
+            url = f'{APIConstants.ALBUM_DETAIL_API}{album_id}'
+            headers = {
+                'User-Agent': APIConstants.USER_AGENT,
+                'Referer': APIConstants.REFERER
+            }
+            
+            response = requests.get(url, headers=headers, cookies=cookies, timeout=30)
+            response.raise_for_status()
+            
+            result = response.json()
+            if result.get('code') != 200:
+                raise APIException(f"获取专辑详情失败: {result.get('message', '未知错误')}")
+            
+            album = result.get('album', {})
+            info = {
+                'id': album.get('id'),
+                'name': album.get('name'),
+                'coverImgUrl': self.get_pic_url(album.get('pic')),
+                'artist': album.get('artist', {}).get('name', ''),
+                'publishTime': album.get('publishTime'),
+                'description': album.get('description', ''),
+                'songs': []
+            }
+            
+            for song in result.get('songs', []):
+                info['songs'].append({
+                    'id': song['id'],
+                    'name': song['name'],
+                    'artists': '/'.join(artist['name'] for artist in song['ar']),
+                    'album': song['al']['name'],
+                    'picUrl': self.get_pic_url(song['al'].get('pic'))
+                })
+            
+            return info
+        except requests.RequestException as e:
+            raise APIException(f"获取专辑详情请求失败: {e}")
+        except (json.JSONDecodeError, KeyError) as e:
+            raise APIException(f"解析专辑详情响应失败: {e}")
+    
+
     def find_todays_playlist(self, uid: int, tdl: str) -> Dict[str, Any] | None:
         """
         查找今天日期命名的播放列表
