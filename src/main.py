@@ -92,7 +92,7 @@ class MusicSyncApp:
 
             if is_debug:
                 # 调试时使用固定日期
-                today = '20251017'
+                today = '20251025'
             else:
                 # 运行时使用当前日期
                 today = datetime.now().strftime("%Y%m%d")
@@ -127,16 +127,23 @@ class MusicSyncApp:
                     title = song.get("name")
                     artists = song.get("artists", "")
                     album = song.get("album", "")
+                    song_id = song.get("id")
                     
                     exists = self.navidrome.navidrome_song_exists(title, artists, album)
                     if exists.get("exists", False):
                         library_exists_count += 1
                     else:
                         # 库中不存在，检查本地是否已下载
-                        if self.downloader.is_song_already_downloaded(song, self.quality_level):
-                            local_exists_count += 1
+                        # 先获取歌曲详情
+                        music_info=self.downloader.get_music_info(song_id, self.quality_level)
+                        if music_info is None:
+                            self.logger.warning(f"无法获取歌曲ID {song_id} 的下载信息，跳过该歌曲")
+                            continue
                         else:
-                            songs_to_download.append(song)
+                            if self.downloader.is_song_already_downloaded(music_info):
+                                local_exists_count += 1
+                            else:
+                                songs_to_download.append(music_info)
             elif self.use_mysql:
                 self.logger.info("启用MySQLe检查，筛选不在库中的歌曲")
                 self.mysql_checker=MySQLChecker(self.config)
@@ -145,24 +152,37 @@ class MusicSyncApp:
                     title = song.get("name")
                     artists = song.get("artists", "")
                     album = song.get("album", "")
-                    
+                    song_id = song.get("id")
                     exists = self.mysql_checker.check_song(title, artists)
                     if exists:
                         library_exists_count += 1
                     else:
                         # 库中不存在，检查本地是否已下载
-                        if self.downloader.is_song_already_downloaded(song, self.quality_level):
-                            local_exists_count += 1
+                        # 先获取歌曲详情
+                        music_info=self.downloader.get_music_info(song_id, self.quality_level)
+                        if music_info is None:
+                            self.logger.warning(f"无法获取歌曲ID {song_id} 的下载信息，跳过该歌曲")
+                            continue
                         else:
-                            songs_to_download.append(song)
+                            if self.downloader.is_song_already_downloaded(music_info):
+                                local_exists_count += 1
+                            else:
+                                songs_to_download.append(music_info)
                 self.mysql_checker.close_connection()
             else:
                 self.logger.info("未启用任何检查，仅检查本地是否已下载")
                 for song in songs:
-                    if self.downloader.is_song_already_downloaded(song, self.quality_level):
-                        local_exists_count += 1  # 本地已存在
+                    song_id = song.get("id")
+                    # 先获取歌曲详情
+                    music_info=self.downloader.get_music_info(song_id, self.quality_level)
+                    if music_info is None:
+                        self.logger.warning(f"无法获取歌曲ID {song_id} 的下载信息，跳过该歌曲")
+                        continue
                     else:
-                        songs_to_download.append(song)
+                        if self.downloader.is_song_already_downloaded(music_info):
+                            local_exists_count += 1  # 本地已存在
+                        else:
+                            songs_to_download.append(song)
             # 统计4：应下载的歌曲数
             should_download = len(songs_to_download)
             # 发送【筛选阶段】统计通知
