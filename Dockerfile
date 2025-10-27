@@ -45,7 +45,7 @@ ENV TZ=Asia/Shanghai
 
 # 安装运行必需工具
 RUN apk update && apk add --no-cache \
-    cronie  \
+    busybox  # 自带轻量版 crond，体积远小于 cronie \
     git \
     ca-certificates \
     && rm -rf /var/cache/apk/*
