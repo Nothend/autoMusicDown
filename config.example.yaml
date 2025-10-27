@@ -1,5 +1,5 @@
 # 网易云配置
-cookie: your_cookie_here # 不用单引号或双引号
+cookie: 1eb9ce22024bb666e99b6743b2222f29ef64a9e88fda0fd5754714b900a5d70d993166e004087dd3b95085f6a85b059f5e9aba41e3f2646e3cebdbec0317df58c119e5;os=pc;appver=8.9.75 # 不用单引号或双引号
 uid: 123456  # 网易云用户ID
 
 # 日志级别
