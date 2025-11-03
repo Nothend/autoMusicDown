@@ -3,6 +3,8 @@ from datetime import datetime
 from enum import Enum
 import logging
 import os
+import io
+from PIL import Image,ImageOps
 from pathlib import Path
 import re
 import hashlib
@@ -14,7 +16,7 @@ from io import BytesIO
 import requests
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, APIC
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, APIC,TYER,USLT
 from mutagen.mp4 import MP4
 
 from netease import NeteaseMusic, APIException
@@ -155,28 +157,35 @@ class SongDownloader:
     
     def _timestamp_str_to_date(self, timestamp_int: int) -> str:
         """
-        将整数时间戳（13位或11位）转换为YYYY-MM-DD格式
+        将整数时间戳（10-13位）转换为YYYY-MM-DD格式
         
         Args:
-            timestamp: 整数时间戳（如1305388800000或13053888000）
+            timestamp_int: 整数时间戳（如1305388800（10位秒级）、984240000007（12位毫秒级）、1620000000000（13位毫秒级））
             
         Returns:
             格式化后的日期字符串，转换失败返回空字符串
         """
         try:
-            # 1. 处理11位时间戳（补全为13位毫秒级）
-            if 10**10 <= timestamp_int < 10**11:  # 11位数字范围（10000000000 ~ 99999999999）
-                timestamp_int *= 100  # 转换为13位（如13053888000 → 1305388800000）
+            # 1. 统一转换为毫秒级时间戳（根据实际值判断是否为秒级）
+            # 阈值：5e11毫秒 ≈ 1985年，小于该值的10-12位可能是秒级
+            if timestamp_int < 10**10:
+                # 小于10位：无效
+                return ""
+            elif timestamp_int < 5 * 10**11:
+                # 10-11位且小于5e11：视为秒级，转换为毫秒级（×1000）
+                timestamp_int *= 1000
+            # 12-13位且>=5e11：视为毫秒级，不转换（保持原数）
             
-            # 2. 验证13位时间戳（毫秒级）
-            if not (10**12 <= timestamp_int < 10**13):  # 13位数字范围（1000000000000 ~ 9999999999999）
+            # 2. 验证时间范围（1970-01-01 ~ 2100-12-31）
+            min_ts = 0  # 1970-01-01 00:00:00（毫秒级）
+            max_ts = 4102444799000  # 2100-12-31 23:59:59（毫秒级，修正后的值）
+            if not (min_ts <= timestamp_int <= max_ts):
                 return ""
             
-            # 3. 转换为年月日（毫秒级时间戳需÷1000）
+            # 3. 转换为日期（毫秒级→秒级）
             return datetime.fromtimestamp(timestamp_int / 1000).strftime("%Y-%m-%d")
         
         except (ValueError, TypeError, OSError):
-            # 处理异常情况（如数值溢出、非整数类型等）
             return ""
 
     def _determine_file_extension(self, url: str, content_type: str = "") -> str:
@@ -306,8 +315,7 @@ class SongDownloader:
             
             
             # 获取音乐基本信息
-            song_info = music_info
-            music_id = song_info.id
+            music_id = music_info.id
             
 
             # 生成可能的文件名
@@ -383,7 +391,7 @@ class SongDownloader:
             )
 
     
-    def download_songs(self, songs: List[Dict[str, Any]], quality: str) -> List[Dict[str, Any]]:
+    def download_songs(self, songs: List[MusicInfo], quality: str) -> List[MusicInfo]:
         """
         下载多首歌曲（顺序下载）
         
@@ -758,86 +766,147 @@ class SongDownloader:
             print(f"写入音乐标签失败: {e}")
     
     def _write_mp3_tags(self, file_path: Path, music_info: MusicInfo) -> None:
-        """写入MP3标签"""
+        """写入MP3标签（图片>5MB自动压缩，失败不影响其他标签）"""
         try:
             audio = MP3(str(file_path), ID3=ID3)
+            if not audio.tags:
+                audio.add_tags()
             
-            # 添加ID3标签
-            audio.tags.add(TIT2(encoding=3, text=music_info.name))
-            audio.tags.add(TPE1(encoding=3, text=music_info.artists))
-            audio.tags.add(TALB(encoding=3, text=music_info.album))
+            # ---------------------- 1. 保存基础标签 ----------------------
+            # 基础信息（标题/艺术家/专辑等）
+            audio.tags.setall('TIT2', [TIT2(encoding=3, text=music_info.name)])
+            audio.tags.setall('TPE1', [TPE1(encoding=3, text=music_info.artists)])
+            audio.tags.setall('TALB', [TALB(encoding=3, text=music_info.album)])
             
             if music_info.track_number > 0:
-                audio.tags.add(TRCK(encoding=3, text=str(music_info.track_number)))
+                audio.tags.setall('TRCK', [TRCK(encoding=3, text=str(music_info.track_number))])
             
-            # 下载并添加封面
+            # 发行时间
+            if hasattr(music_info, 'publishTime') and music_info.publishTime:
+                full_date = music_info.publishTime.strip()
+                try:
+                    year = full_date.split('-')[0] if '-' in full_date else full_date
+                    audio.tags.setall('TYER', [TYER(encoding=3, text=year)])
+                    audio.tags.setall('TDRC', [TDRC(encoding=3, text=full_date)])
+                except Exception as e:
+                    self.logger.warning(f"发行时间处理失败: {str(e)}")
+            
+            # 歌词
+            if music_info.lyric:
+                audio.tags.setall('USLT', [USLT(
+                    encoding=3, lang='XXX', desc='Lyrics', text=music_info.lyric.strip()
+                )])
+            if music_info.tlyric:
+                audio.tags.setall('USLT:Translated', [USLT(
+                    encoding=3, lang='XXX', desc='Translated Lyrics', text=music_info.tlyric.strip()
+                )])
+            
+            # 先保存基础标签
+            audio.save()
+            self.logger.debug(f"已保存MP3基础标签: {file_path.name}")
+            
+            # ---------------------- 2. 处理图片（>5MB自动压缩） ----------------------
             if music_info.pic_url:
                 try:
+                    # 下载图片
                     pic_response = requests.get(music_info.pic_url, timeout=10)
                     pic_response.raise_for_status()
-                    audio.tags.add(APIC(
-                        encoding=3,
-                        mime='image/jpeg',
-                        type=3,
-                        desc='Cover',
-                        data=pic_response.content
-                    ))
-                except:
-                    pass  # 封面下载失败不影响主流程
+                    image_data = pic_response.content
+                    original_size = len(image_data)
+                    max_size = 5 * 1024 * 1024  # 5MB
+                    
+                    # 压缩逻辑
+                    if original_size > max_size:
+                        self.logger.debug(f"MP3图片过大（{original_size}字节），开始压缩...")
+                        compressed_data = self._compress_image(image_data, max_size)
+                        if not compressed_data:
+                            self.logger.warning("压缩后仍超过5MB，跳过封面")
+                            return  # 退出图片处理逻辑
+                        image_data = compressed_data
+                        self.logger.debug(f"压缩后大小: {len(image_data)}字节")
+                    
+                    # 添加封面并保存
+                    mime_type = pic_response.headers.get('content-type', 'image/jpeg')
+                    audio.tags.setall('APIC', [APIC(
+                        encoding=3, mime=mime_type, type=3, desc='Cover', data=image_data
+                    )])
+                    audio.save()
+                    self.logger.debug("已添加MP3封面并保存")
+                
+                except Exception as e:
+                    self.logger.warning(f"MP3封面处理失败（不影响其他标签）: {str(e)}")
             
-            audio.save()
         except Exception as e:
-            print(f"写入MP3标签失败: {e}")
-    
+            self.logger.error(f"MP3基础标签处理失败: {str(e)}")
+                    
     def _write_flac_tags(self, file_path: Path, music_info: MusicInfo) -> None:
-        """写入FLAC标签"""
+        """写入FLAC标签（图片>5MB自动压缩，失败不影响其他标签）"""
         try:
             audio = FLAC(str(file_path))
             
+            # ---------------------- 1. 保存基础标签 ----------------------
+            # 基础信息
             audio['TITLE'] = music_info.name
             audio['ARTIST'] = music_info.artists
             audio['ALBUM'] = music_info.album
-
             if music_info.track_number > 0:
                 audio['TRACKNUMBER'] = str(music_info.track_number)
             
-            # 处理发行时间标签（DATE: YYYY-MM-DD，YEAR: YYYY）
+            # 发行时间
             if hasattr(music_info, 'publishTime') and music_info.publishTime:
-                full_date = music_info.publishTime.strip()
-                # 校验是否为 YYYY-MM-DD 格式
-                if re.match(r'^\d{4}-\d{2}-\d{2}$', full_date):
-                    audio['DATE'] = full_date  # 完整日期
-                    audio['YEAR'] = full_date.split('-')[0]  # 提取年份
-                else:
-                    self.logger.warning(f"publishTime格式错误（需YYYY-MM-DD），实际值: {full_date}，跳过日期标签")
+                full_date = music_info.publishTime
+                audio['YEAR'] = full_date.split('-')[0] if '-' in full_date else full_date
+                audio['DATE'] = full_date
             else:
                 self.logger.debug("publishTime为空，跳过日期标签")
-            # 新增：歌词标签（使用自定义字段存储歌词和翻译歌词）
+            
+            # 歌词
             if music_info.lyric:
-                audio['LYRICS'] = music_info.lyric.strip()  # 原歌词
+                audio['LYRICS'] = music_info.lyric.strip()
             if music_info.tlyric:
-                audio['TRANSLATEDLYRICS'] = music_info.tlyric.strip()  # 翻译歌词
-
-            # 下载并添加封面
+                audio['TRANSLATEDLYRICS'] = music_info.tlyric.strip()
+            
+            # 先保存基础标签
+            audio.save()
+            self.logger.debug(f"已保存FLAC基础标签: {file_path.name}")
+            
+            # ---------------------- 2. 处理图片（>5MB自动压缩） ----------------------
             if music_info.pic_url:
                 try:
+                    # 下载图片
                     pic_response = requests.get(music_info.pic_url, timeout=10)
                     pic_response.raise_for_status()
+                    image_data = pic_response.content
+                    original_size = len(image_data)
+                    max_size = 5 * 1024 * 1024  # 5MB
                     
+                    # 压缩逻辑
+                    if original_size > max_size:
+                        self.logger.debug(f"FLAC图片过大（{original_size}字节），开始压缩...")
+                        compressed_data = self._compress_image(image_data, max_size)
+                        if not compressed_data:
+                            self.logger.warning("压缩后仍超过5MB，跳过封面")
+                            return  # 退出图片处理逻辑
+                        image_data = compressed_data
+                        self.logger.debug(f"压缩后大小: {len(image_data)}字节")
+                    
+                    # 添加封面并保存
                     from mutagen.flac import Picture
                     picture = Picture()
-                    picture.type = 3  # Cover (front)
-                    picture.mime = 'image/jpeg'
+                    picture.type = 3
+                    picture.mime = 'image/jpeg' if image_data.startswith(b'\xff\xd8') else 'image/png'
                     picture.desc = 'Cover'
-                    picture.data = pic_response.content
+                    picture.data = image_data
                     audio.add_picture(picture)
-                except:
-                    pass  # 封面下载失败不影响主流程
+                    audio.save()
+                    self.logger.debug("已添加FLAC封面并保存")
+                
+                except Exception as e:
+                    self.logger.warning(f"FLAC封面处理失败（不影响其他标签）: {str(e)}")
             
-            audio.save()
         except Exception as e:
-            print(f"写入FLAC标签失败: {e}")
-    
+            self.logger.error(f"FLAC基础标签处理失败: {str(e)}")
+                
     def _write_m4a_tags(self, file_path: Path, music_info: MusicInfo) -> None:
         """写入M4A标签"""
         try:
@@ -862,7 +931,104 @@ class SongDownloader:
             audio.save()
         except Exception as e:
             print(f"写入M4A标签失败: {e}")
-
+    
+    def _compress_image(self, image_data: bytes, max_size: int = 5 * 1024 * 1024, max_dimension: int = 2000) -> bytes:
+        """
+        压缩图片至指定大小（默认5MB），PNG可转为JPEG继续压缩，优先保持清晰度
+        """
+        try:
+            # 检查原始大小是否已符合要求
+            if len(image_data) <= max_size:
+                return image_data
+            
+            # 打开图片并获取原始信息
+            with Image.open(io.BytesIO(image_data)) as img:
+                original_width, original_height = img.size
+                img_format = img.format if img.format in ['JPEG', 'PNG'] else 'JPEG'
+                is_png = img_format == 'PNG'
+                converted_to_jpeg = False  # 标记是否从PNG转为JPEG
+                
+                # ---------------------- 1. 优先调整尺寸 ----------------------
+                # 缩放至最大边长以内（保持宽高比）
+                if original_width > max_dimension or original_height > max_dimension:
+                    scale = min(max_dimension / original_width, max_dimension / original_height)
+                    new_width = int(original_width * scale)
+                    new_height = int(original_height * scale)
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    self.logger.debug(f"图片尺寸过大，缩放到 {new_width}x{new_height}（原尺寸 {original_width}x{original_height}）")
+                
+                # 检查缩放后的大小
+                buffer = io.BytesIO()
+                img.save(buffer, format=img_format, quality=95 if not is_png else None, optimize=True)
+                scaled_data = buffer.getvalue()
+                if len(scaled_data) <= max_size:
+                    return scaled_data
+                
+                # ---------------------- 2. PNG转JPEG（若仍超标） ----------------------
+                if is_png:
+                    self.logger.debug("PNG图片缩放后仍超标，尝试转为JPEG格式压缩")
+                    
+                    # 处理透明背景：用白色填充透明区域（可改为其他颜色，如(255,255,255)）
+                    if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                        # 创建白色背景的新图片
+                        background = Image.new(img.mode[:-1], img.size, (255, 255, 255))
+                        # 合并透明层到白色背景（抗锯齿边缘）
+                        background.paste(img, img.split()[-1])
+                        img = background.convert('RGB')  # 转为RGB模式（JPEG不支持透明）
+                    else:
+                        img = img.convert('RGB')  # 非透明PNG直接转RGB
+                    
+                    img_format = 'JPEG'  # 标记为JPEG
+                    converted_to_jpeg = True  # 记录格式转换
+                    
+                    # 检查转换格式后的大小（不降低质量）
+                    buffer = io.BytesIO()
+                    img.save(buffer, format='JPEG', quality=95, optimize=True)
+                    converted_data = buffer.getvalue()
+                    if len(converted_data) <= max_size:
+                        self.logger.debug("PNG转JPEG后大小符合要求，无需进一步压缩")
+                        return converted_data
+                
+                # ---------------------- 3. 调整JPEG质量参数（最终压缩） ----------------------
+                # 此时img_format应为JPEG（原始JPEG或从PNG转换而来）
+                quality = 90
+                min_quality = 70
+                quality_step = 2
+                max_attempts = (quality - min_quality) // quality_step
+                attempts = 0
+                
+                while attempts < max_attempts:
+                    buffer = io.BytesIO()
+                    img.save(
+                        buffer,
+                        format='JPEG',
+                        quality=quality,
+                        optimize=True,
+                        progressive=True  # 渐进式加载提升观感
+                    )
+                    compressed_data = buffer.getvalue()
+                    compressed_size = len(compressed_data)
+                    
+                    if compressed_size <= max_size:
+                        msg = f"压缩后大小: {compressed_size}字节（质量参数: {quality}"
+                        if converted_to_jpeg:
+                            msg += "，已从PNG转为JPEG"
+                        msg += "）"
+                        self.logger.debug(msg)
+                        return compressed_data
+                    
+                    # 降低质量继续尝试
+                    quality -= quality_step
+                    attempts += 1
+                
+                # 所有尝试后仍超标
+                self.logger.warning(f"图片压缩至最低质量({min_quality})仍超过{max_size}字节")
+                return None
+        
+        except Exception as e:
+            self.logger.warning(f"图片压缩失败: {str(e)}")
+            return None
+        
     def get_download_progress(self, music_id: int, quality: str = "standard") -> Dict[str, Any]:
         """获取下载进度信息
         

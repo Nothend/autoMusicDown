@@ -459,28 +459,35 @@ class NeteaseMusic:
     
     def _timestamp_str_to_date(self, timestamp_int: int) -> str:
         """
-        将整数时间戳（13位或11位）转换为YYYY-MM-DD格式
+        将整数时间戳（10-13位）转换为YYYY-MM-DD格式
         
         Args:
-            timestamp: 整数时间戳（如1305388800000或13053888000）
+            timestamp_int: 整数时间戳（如1305388800（10位秒级）、984240000007（12位毫秒级）、1620000000000（13位毫秒级））
             
         Returns:
             格式化后的日期字符串，转换失败返回空字符串
         """
         try:
-            # 1. 处理11位时间戳（补全为13位毫秒级）
-            if 10**10 <= timestamp_int < 10**11:  # 11位数字范围（10000000000 ~ 99999999999）
-                timestamp *= 100  # 转换为13位（如13053888000 → 1305388800000）
+            # 1. 统一转换为毫秒级时间戳（根据实际值判断是否为秒级）
+            # 阈值：5e11毫秒 ≈ 1985年，小于该值的10-12位可能是秒级
+            if timestamp_int < 10**10:
+                # 小于10位：无效
+                return ""
+            elif timestamp_int < 5 * 10**11:
+                # 10-11位且小于5e11：视为秒级，转换为毫秒级（×1000）
+                timestamp_int *= 1000
+            # 12-13位且>=5e11：视为毫秒级，不转换（保持原数）
             
-            # 2. 验证13位时间戳（毫秒级）
-            if not (10**12 <= timestamp_int < 10**13):  # 13位数字范围（1000000000000 ~ 9999999999999）
+            # 2. 验证时间范围（1970-01-01 ~ 2100-12-31）
+            min_ts = 0  # 1970-01-01 00:00:00（毫秒级）
+            max_ts = 4102444799000  # 2100-12-31 23:59:59（毫秒级，修正后的值）
+            if not (min_ts <= timestamp_int <= max_ts):
                 return ""
             
-            # 3. 转换为年月日（毫秒级时间戳需÷1000）
+            # 3. 转换为日期（毫秒级→秒级）
             return datetime.fromtimestamp(timestamp_int / 1000).strftime("%Y-%m-%d")
         
         except (ValueError, TypeError, OSError):
-            # 处理异常情况（如数值溢出、非整数类型等）
             return ""
 
     def get_song_url(self, song_id: int, quality: str, cookies: Dict[str, str]) -> Dict[str, Any]:

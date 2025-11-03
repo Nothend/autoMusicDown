@@ -181,7 +181,7 @@ class MusicSyncApp:
                         if self.downloader.is_song_already_downloaded(music_info):
                             local_exists_count += 1  # 本地已存在
                         else:
-                            songs_to_download.append(song)
+                            songs_to_download.append(music_info)
             # 统计4：应下载的歌曲数
             should_download = len(songs_to_download)
             # 发送【筛选阶段】统计通知
