@@ -1,5 +1,5 @@
 # 网易云配置
-cookie: 1eb9ce22024bb666e99b6743b2222f29ef64a9e88fda0fd5754714b900a5d70d993166e004087dd3b95085f6a85b059f5e9aba41e3f2646e3cebdbec0317df58c119e5;os=pc;appver=8.9.75 # 不用单引号或双引号
+cookie: MUSIC_U=003955F;os=pc;appver=8.9.75 # 不用单引号或双引号
 uid: 123456  # 网易云用户ID
 
 # 日志级别
@@ -21,7 +21,7 @@ QUALITY_LEVEL: "lossless"
 NAVIDROME:
   NAVIDROME_HOST: "http://192.168.0.6:4533"
   NAVIDROME_USER: "admin"
-  NAVIDROME_PASS: "admin"
+  NAVIDROME_PASS: "9527"
   # 是否开启 Navidrome 检查
   USE_NAVIDROME: true
 
@@ -36,7 +36,7 @@ mysql:
   # 数据库用户名
   user: root
   # 数据库密码
-  password: password
+  password: 9527
   # 数据库名称
   database: music_tag
 # Bark通知配置
