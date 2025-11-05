@@ -89,7 +89,7 @@ class NavidromeClient:
             self.logger.error(f"Navidrome 认证失败: {str(e)}")
             raise
     
-    def navidrome_song_exists(self, title: str, artists: str, album: str) -> dict:
+    def navidrome_song_exists(self, title: str, artists: list, album: str) -> dict:  # 注意：参数类型标注改为 list
         """
         优化匹配逻辑：
         - 歌手名+歌曲名匹配，且格式不是MP3则存在；专辑名匹配不影响核心判定
@@ -151,7 +151,8 @@ class NavidromeClient:
             # 预处理匹配条件
             title_target = title.strip().lower()
             album_target = (album or "").strip().lower()
-            input_artists = [a.strip().lower() for a in re.split(r'[\/,;]', artists or '') if a.strip()]
+            # 核心修改：artists是列表，直接清洗列表元素（无需分割字符串）
+            input_artists = [a.strip().lower() for a in (artists or []) if a.strip()]  # 遍历列表，处理每个艺术家名
 
             for item in candidates:
                 # 提取候选歌曲信息
@@ -168,9 +169,11 @@ class NavidromeClient:
 
                 # 2. 歌手名匹配（双向匹配逻辑）
                 artist_match = False
+                # 分割Navidrome返回的艺术家字符串（可能是用逗号/分号连接的）
                 nav_artists_split = [a.strip().lower() for a in re.split(r'[\/,;]', nav_artist_lower) if a.strip()]
                 
                 if input_artists:
+                    # 检查输入的每个艺术家是否在候选艺术家列表中，或反之
                     for in_artist in input_artists:
                         if in_artist in nav_artist_lower or any(nd in in_artist for nd in nav_artists_split):
                             artist_match = True
@@ -182,34 +185,40 @@ class NavidromeClient:
                     self.logger.debug(f"歌手名不匹配: {nav_artist_lower} vs {input_artists}")
                     continue
 
-                # 3. 检查格式是否为MP3（核心修改点）
+                # 3. 检查格式是否为MP3
                 file_type = self._get_file_type(item)
                 is_mp3 = file_type.lower() == "mp3"
                 if is_mp3:
-                    self.logger.debug(f"匹配到但格式为MP3，视为不存在: {title} - {artists}")
-                    continue  # 跳过MP3格式的匹配项，继续查找其他格式
+                    # 日志优化：将艺术家列表转为字符串显示
+                    artists_str = ' & '.join(artists) if artists else '未知艺术家'
+                    self.logger.debug(f"匹配到但格式为MP3，视为不存在: {title} - {artists_str}")
+                    continue  # 跳过MP3格式的匹配项
 
                 # 4. 非MP3格式且匹配，返回存在
                 file_size = self._get_file_size(item)
                 size_formatted = self._format_file_size(file_size) if file_size else ""
                 album_match = (album_target == nav_album) if album_target else True
 
+                # 日志优化：将艺术家列表转为字符串显示
+                artists_str = ' & '.join(artists) if artists else '未知艺术家'
                 self.logger.debug(
-                    f"找到匹配歌曲（非MP3）: {title} - {artists} "
+                    f"找到匹配歌曲（非MP3）: {title} - {artists_str} "
                     f"[专辑匹配: {album_match}, 格式: {file_type}, 大小: {size_formatted}]"
                 )
 
                 return {
                     "exists": True,
                     "album": str(item.get('album', "")).strip(),
-                    "artists": nav_artist_full,
+                    "artists": nav_artist_full,  # 保持Navidrome返回的原始艺术家字符串
                     "file_type": file_type,
                     "file_size": file_size,
                     "file_size_formatted": size_formatted,
                     "is_mp3": is_mp3
                 }
 
-            self.logger.debug(f"未找到非MP3格式的匹配歌曲: {title} - {artists}")
+            # 日志优化：将艺术家列表转为字符串显示
+            artists_str = ' & '.join(artists) if artists else '未知艺术家'
+            self.logger.debug(f"未找到非MP3格式的匹配歌曲: {title} - {artists_str}")
             return self._get_empty_result()
 
         except requests.exceptions.HTTPError as e:

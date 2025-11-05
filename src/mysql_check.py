@@ -122,13 +122,13 @@ class MySQLChecker:
                 raise ConnectionError(f"MySQL连接失败: {str(e)}")
         return self.mysql_connection
 
-    def check_song(self, song_name: str, artists_str: str) -> bool:
+    def check_song(self, song_name: str, artists: list) -> bool:
         """
         检查歌曲是否存在（依赖外部已打开的连接）
         
         Args:
             song_name: 歌曲名称
-            artists_str: 歌手字符串（支持多种分隔符）
+            artists: 艺术家列表（每个元素为独立艺术家名）
             
         Returns:
             - 存在非MP3格式: True
@@ -139,31 +139,33 @@ class MySQLChecker:
             self.logger.error("无活跃数据库连接，请先调用open_connection()")
             raise ConnectionError("数据库连接未打开或已关闭")
         
-        if not song_name or not artists_str:
-            self.logger.warning("歌曲名或歌手字符串为空，无法检查")
+        if not song_name or not artists:
+            self.logger.warning("歌曲名或艺术家列表为空，无法检查")
             return False
         
-        # 分割歌手字符串
-        artists = self._split_artists(artists_str)
-        if not artists:
-            self.logger.warning("分割后无有效歌手，无法检查")
+        # 清洗艺术家列表（去除空值和空格）
+        cleaned_artists = [artist.strip() for artist in artists if artist.strip()]
+        if not cleaned_artists:
+            self.logger.warning("清洗后无有效艺术家，无法检查")
             return False
         
         try:
             with self.mysql_connection.cursor() as cursor:  # 复用已打开的连接
                 # 构建歌手IN条件（任意匹配）
-                artist_placeholders = ", ".join(["%s"] * len(artists))
+                artist_placeholders = ", ".join(["%s"] * len(cleaned_artists))
                 sql = f"""
                     SELECT t.suffix 
                     FROM music_track t
                     INNER JOIN music_artist a ON t.artist_id = a.id
                     WHERE t.name = %s 
-                      AND a.name IN ({artist_placeholders})
+                    AND a.name IN ({artist_placeholders})
                     LIMIT 1
                 """
-                self.logger.debug(f"执行SQL: {sql}，参数: {[song_name] + artists}")
+                # 日志中显示艺术家列表（转为字符串方便阅读）
+                artists_str = " & ".join(cleaned_artists)
+                self.logger.debug(f"执行SQL: {sql}，参数: {[song_name] + cleaned_artists}")
                 
-                cursor.execute(sql, [song_name] + artists)
+                cursor.execute(sql, [song_name] + cleaned_artists)
                 result = cursor.fetchone()
                 
                 if not result:
@@ -183,8 +185,7 @@ class MySQLChecker:
         except Exception as e:
             self.logger.error(f"歌曲检查过程出错: {str(e)}")
             return False
-
-
+        
 # 批量检查示例（核心改进点）
 if __name__ == "__main__":
     # 初始化日志
