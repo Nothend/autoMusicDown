@@ -89,9 +89,6 @@ class SongDownloader:
             'flac': AudioFormat.FLAC,
             'm4a': AudioFormat.M4A
         }
-        
-        # 缓存已计算的文件哈希，提高效率
-        self.file_hash_cache = {}
 
     def _get_download_dir(self) -> Path:
         # 检查是否为Docker环境（通过/.dockerenv文件判断）
@@ -494,9 +491,6 @@ class SongDownloader:
             # 写入音乐标签
             self._write_music_tags(file_path, music_info)
             
-            # 添加到哈希缓存
-            self.file_hash_cache[file_path] = self._calculate_file_hash(file_path)
-            
             return DownloadResult(
                 success=True,
                 file_path=str(file_path),
@@ -560,9 +554,6 @@ class SongDownloader:
             
             # 写入音乐标签
             self._write_music_tags(file_path, music_info)
-            
-            # 添加到哈希缓存
-            self.file_hash_cache[file_path] = self._calculate_file_hash(file_path)
             
             return DownloadResult(
                 success=True,
@@ -838,102 +829,88 @@ class SongDownloader:
             print(f"写入M4A标签失败: {e}")
     
     def _compress_image(self, image_data: bytes, max_size: int = 5 * 1024 * 1024, max_dimension: int = 2000) -> bytes:
-        """
-        压缩图片至指定大小（默认5MB），PNG可转为JPEG继续压缩，优先保持清晰度
-        """
+        """压缩图片至指定大小，处理DecompressionBombWarning"""
         try:
-            # 检查原始大小是否已符合要求
+            # ---------------------- 关键：在打开图片前就调整像素限制 ----------------------
+            # 保存原始限制，用于后续恢复
+            original_max_pixels = Image.MAX_IMAGE_PIXELS
+            # 临时提高限制（1.6亿像素，覆盖用户的1.56亿像素场景）
+            Image.MAX_IMAGE_PIXELS = 160000000  # 1.6亿像素
+
+            # 检查原始大小是否符合要求
             if len(image_data) <= max_size:
                 return image_data
             
-            # 打开图片并获取原始信息
+            # ---------------------- 此时打开图片，限制已生效，不会触发警告 ----------------------
             with Image.open(io.BytesIO(image_data)) as img:
                 original_width, original_height = img.size
+                total_pixels = original_width * original_height
+                self.logger.debug(f"图片像素: {total_pixels}（{original_width}x{original_height}）")
+                
+                # 主动检查：如果像素仍然过大（比如超过2亿），直接拒绝处理（防恶意文件）
+                if total_pixels > 200000000:  # 2亿像素阈值
+                    self.logger.error(f"图片像素过大（{total_pixels}），可能是恶意文件，拒绝处理")
+                    return None
+
                 img_format = img.format if img.format in ['JPEG', 'PNG'] else 'JPEG'
                 is_png = img_format == 'PNG'
-                converted_to_jpeg = False  # 标记是否从PNG转为JPEG
+                converted_to_jpeg = False
                 
-                # ---------------------- 1. 优先调整尺寸 ----------------------
-                # 缩放至最大边长以内（保持宽高比）
+                # 缩放尺寸（原逻辑不变）
                 if original_width > max_dimension or original_height > max_dimension:
                     scale = min(max_dimension / original_width, max_dimension / original_height)
-                    new_width = int(original_width * scale)
-                    new_height = int(original_height * scale)
+                    new_width, new_height = int(original_width * scale), int(original_height * scale)
                     img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                    self.logger.debug(f"图片尺寸过大，缩放到 {new_width}x{new_height}（原尺寸 {original_width}x{original_height}）")
+                    self.logger.debug(f"缩放到 {new_width}x{new_height}")
                 
-                # 检查缩放后的大小
+                # 检查缩放后大小
                 buffer = io.BytesIO()
                 img.save(buffer, format=img_format, quality=95 if not is_png else None, optimize=True)
                 scaled_data = buffer.getvalue()
                 if len(scaled_data) <= max_size:
                     return scaled_data
                 
-                # ---------------------- 2. PNG转JPEG（若仍超标） ----------------------
+                # PNG转JPEG（原逻辑不变）
                 if is_png:
-                    self.logger.debug("PNG图片缩放后仍超标，尝试转为JPEG格式压缩")
-                    
-                    # 处理透明背景：用白色填充透明区域（可改为其他颜色，如(255,255,255)）
+                    self.logger.debug("PNG转JPEG尝试压缩")
                     if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-                        # 创建白色背景的新图片
                         background = Image.new(img.mode[:-1], img.size, (255, 255, 255))
-                        # 合并透明层到白色背景（抗锯齿边缘）
                         background.paste(img, img.split()[-1])
-                        img = background.convert('RGB')  # 转为RGB模式（JPEG不支持透明）
+                        img = background.convert('RGB')
                     else:
-                        img = img.convert('RGB')  # 非透明PNG直接转RGB
+                        img = img.convert('RGB')
+                    img_format = 'JPEG'
+                    converted_to_jpeg = True
                     
-                    img_format = 'JPEG'  # 标记为JPEG
-                    converted_to_jpeg = True  # 记录格式转换
-                    
-                    # 检查转换格式后的大小（不降低质量）
                     buffer = io.BytesIO()
                     img.save(buffer, format='JPEG', quality=95, optimize=True)
                     converted_data = buffer.getvalue()
                     if len(converted_data) <= max_size:
-                        self.logger.debug("PNG转JPEG后大小符合要求，无需进一步压缩")
                         return converted_data
                 
-                # ---------------------- 3. 调整JPEG质量参数（最终压缩） ----------------------
-                # 此时img_format应为JPEG（原始JPEG或从PNG转换而来）
+                # 调整JPEG质量（原逻辑不变）
                 quality = 90
                 min_quality = 70
                 quality_step = 2
-                max_attempts = (quality - min_quality) // quality_step
-                attempts = 0
-                
-                while attempts < max_attempts:
+                while quality >= min_quality:
                     buffer = io.BytesIO()
-                    img.save(
-                        buffer,
-                        format='JPEG',
-                        quality=quality,
-                        optimize=True,
-                        progressive=True  # 渐进式加载提升观感
-                    )
+                    img.save(buffer, format='JPEG', quality=quality, optimize=True, progressive=True)
                     compressed_data = buffer.getvalue()
-                    compressed_size = len(compressed_data)
-                    
-                    if compressed_size <= max_size:
-                        msg = f"压缩后大小: {compressed_size}字节（质量参数: {quality}"
-                        if converted_to_jpeg:
-                            msg += "，已从PNG转为JPEG"
-                        msg += "）"
-                        self.logger.debug(msg)
+                    if len(compressed_data) <= max_size:
+                        self.logger.debug(f"压缩完成（质量{quality}）")
                         return compressed_data
-                    
-                    # 降低质量继续尝试
                     quality -= quality_step
-                    attempts += 1
                 
-                # 所有尝试后仍超标
-                self.logger.warning(f"图片压缩至最低质量({min_quality})仍超过{max_size}字节")
+                self.logger.warning(f"压缩至最低质量仍超标")
                 return None
-        
+            
         except Exception as e:
-            self.logger.warning(f"图片压缩失败: {str(e)}")
+            self.logger.warning(f"压缩失败: {str(e)}")
             return None
-        
+        finally:
+            # 无论是否出错，都恢复原始像素限制（避免影响全局）
+            Image.MAX_IMAGE_PIXELS = original_max_pixels   
+
     def get_download_progress(self, music_id: int, quality: str = "standard") -> Dict[str, Any]:
         """获取下载进度信息
         
