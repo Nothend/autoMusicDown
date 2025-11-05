@@ -46,7 +46,7 @@ class MusicInfo:
     id: int
     name: str
     publishTime: str
-    artists: str
+    artists: List[str]  # 改为列表类型，存储多个艺术家
     album: str
     pic_url: str
     duration: int
@@ -263,7 +263,7 @@ class SongDownloader:
             tlyric = lyric_result.get('tlyric', {}).get('lyric', '') if lyric_result else ''
             
             # 构建艺术家字符串
-            artists = '; '.join(artist['name'] for artist in song_detail.get('ar', []))
+            artists = [artist['name'] for artist in song_detail.get('ar', [])]  # 生成列表
             # 提取发行时间（处理13位/11位时间戳）
             # 网易云API的album.publishTime为13位毫秒级时间戳
             publish_timestamp = alum_publisTime
@@ -274,7 +274,7 @@ class SongDownloader:
                 id=music_id,
                 name=song_detail.get('name', '未知歌曲'),
                 publishTime=publish_time,
-                artists=artists or '未知艺术家',
+                artists=artists if artists else ['未知艺术家'],  # 列表默认值
                 album=song_detail.get('al', {}).get('name', '未知专辑'),
                 pic_url=song_detail.get('al', {}).get('picUrl', ''),
                 duration=song_detail.get('dt', 0) // 1000,  # 转换为秒
@@ -320,7 +320,7 @@ class SongDownloader:
 
             # 生成可能的文件名
             # 用正则匹配分号及前后可能的空格，统一替换为 &
-            artists_joined = re.sub(r'\s*;\s*', '&', music_info.artists)  # 匹配分号及前后任意空格
+            artists_joined = '&'.join(music_info.artists)  # 列表元素用 & 拼接为字符串
             base_filename = f"{artists_joined} - {music_info.name}"
             safe_filename = self._sanitize_filename(base_filename)
 
@@ -428,11 +428,9 @@ class SongDownloader:
             是否已下载
         """
         try:
-            # 获取音乐信息
-            title = music_info.name
-            artists = music_info.artists
             # 生成可能的文件名
-            base_filename = f"{artists} - {title}"
+            artists_joined = '&'.join(music_info.artists)  # 列表元素用 & 拼接为字符串
+            base_filename = f"{artists_joined} - {music_info.name}"
             safe_filename = self._sanitize_filename(base_filename)
 
             file_ext = self._determine_file_extension(music_info.download_url)
@@ -452,104 +450,7 @@ class SongDownloader:
             self.logger.error(f"通过ID检查歌曲是否已下载时出错: {str(e)}")
             return False
     
-    def _verify_file_integrity(self, file_path: Path, music_info: MusicInfo) -> bool:
-        """
-        验证文件完整性，先检查文件大小，差异较小时再检查哈希
-        
-        Args:
-            file_path: 文件路径
-            music_info: 音乐信息
-            
-        Returns:
-            文件是否匹配
-        """
-        try:
-            # 检查文件大小（允许1%的误差）
-            file_size = file_path.stat().st_size
-            expected_size = music_info.file_size
-            
-            if expected_size > 0:
-                size_diff_ratio = abs(file_size - expected_size) / expected_size
-                if size_diff_ratio < 0.01:  # 大小差异小于1%
-                    return True
-                # 如果大小差异较大，尝试哈希验证（针对可能的不同音质版本）
-                return self._compare_file_hash(file_path, music_info)
-            
-            # 如果没有预期大小，直接使用哈希验证
-            return self._compare_file_hash(file_path, music_info)
-            
-        except Exception as e:
-            self.logger.warning(f"验证文件完整性时出错: {str(e)}")
-            return False
     
-    def _compare_file_hash(self, file_path: Path, music_info: MusicInfo) -> bool:
-        """
-        比较文件哈希值，使用缓存提高效率
-        
-        Args:
-            file_path: 文件路径
-            music_info: 音乐信息
-            
-        Returns:
-            哈希是否匹配
-        """
-        try:
-            # 检查缓存
-            if file_path in self.file_hash_cache:
-                file_hash = self.file_hash_cache[file_path]
-            else:
-                # 计算文件哈希（只计算前1MB和后1MB，提高效率）
-                file_hash = self._calculate_file_hash(file_path)
-                self.file_hash_cache[file_path] = file_hash
-            
-            # 计算期望哈希（基于音乐信息）
-            expected_hash = self._calculate_expected_hash(music_info)
-            
-            return file_hash == expected_hash
-            
-        except Exception as e:
-            self.logger.warning(f"比较文件哈希时出错: {str(e)}")
-            return False
-    
-    def _calculate_file_hash(self, file_path: Path) -> str:
-        """
-        计算文件哈希，只读取部分内容以提高效率
-        
-        Args:
-            file_path: 文件路径
-            
-        Returns:
-            哈希值字符串
-        """
-        hash_obj = hashlib.md5()
-        file_size = file_path.stat().st_size
-        
-        with open(file_path, 'rb') as f:
-            # 读取前1MB
-            hash_obj.update(f.read(1024 * 1024))
-            
-            # 如果文件大于2MB，再读取最后1MB
-            if file_size > 2 * 1024 * 1024:
-                f.seek(-1024 * 1024, os.SEEK_END)
-                hash_obj.update(f.read(1024 * 1024))
-        
-        return hash_obj.hexdigest()
-    
-    def _calculate_expected_hash(self, music_info: MusicInfo) -> str:
-        """
-        基于音乐信息计算期望的哈希值
-        
-        Args:
-            music_info: 音乐信息
-            
-        Returns:
-            期望的哈希值字符串
-        """
-        hash_obj = hashlib.md5()
-        # 使用关键信息计算哈希
-        hash_str = f"{music_info.id}_{music_info.name}_{music_info.artists}_{music_info.album}_{music_info.duration}"
-        hash_obj.update(hash_str.encode('utf-8'))
-        return hash_obj.hexdigest()
     
     def download_music_file(self, music_info: MusicInfo, quality: str = "standard") -> DownloadResult:
         """下载音乐文件到本地
@@ -563,10 +464,9 @@ class SongDownloader:
         """
         try:
             # 生成可能的文件名
-            # 用正则匹配分号及前后可能的空格，统一替换为 &
-            artists_joined = re.sub(r'\s*;\s*', '&', music_info.artists)  # 匹配分号及前后任意空格
-            filename = f"{artists_joined} - {music_info.name}"
-            safe_filename = self._sanitize_filename(filename)
+            artists_joined = '&'.join(music_info.artists)  # 列表元素用 & 拼接为字符串
+            base_filename = f"{artists_joined} - {music_info.name}"
+            safe_filename = self._sanitize_filename(base_filename)
             
             # 确定文件扩展名
             file_ext = self._determine_file_extension(music_info.download_url)
@@ -632,8 +532,9 @@ class SongDownloader:
             music_info = self.get_music_info(music_id, quality)
             
             # 生成文件名
-            filename = f"{music_info.artists} - {music_info.name}"
-            safe_filename = self._sanitize_filename(filename)
+            artists_joined = '&'.join(music_info.artists)  # 列表元素用 & 拼接为字符串
+            base_filename = f"{artists_joined} - {music_info.name}"
+            safe_filename = self._sanitize_filename(base_filename)
             
             # 确定文件扩展名
             file_ext = self._determine_file_extension(music_info.download_url)
@@ -1045,9 +946,11 @@ class SongDownloader:
         """
         try:
             music_info = self.get_music_info(music_id, quality)
-            
-            filename = f"{music_info.artists} - {music_info.name}"
-            safe_filename = self._sanitize_filename(filename)
+
+            artists_joined = '&'.join(music_info.artists)  # 列表元素用 & 拼接为字符串
+            base_filename = f"{artists_joined} - {music_info.name}"
+            safe_filename = self._sanitize_filename(base_filename)
+
             file_ext = self._determine_file_extension(music_info.download_url)
             file_path = self.download_dir / f"{safe_filename}{file_ext}"
             
