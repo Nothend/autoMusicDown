@@ -327,7 +327,7 @@ class NeteaseMusic:
                     info['tracks'].append({
                         'id': song['id'],
                         'name': song['name'],
-                        'artists': '&'.join(artist['name'] for artist in song['ar']),
+                        'artists': ','.join(artist['name'] for artist in song['ar']),
                         'album': song['al']['name'],
                         'picUrl': song['al']['picUrl']
                     })
@@ -380,7 +380,7 @@ class NeteaseMusic:
                 info['songs'].append({
                     'id': song['id'],
                     'name': song['name'],
-                    'artists': '&'.join(artist['name'] for artist in song['ar']),
+                    'artists': ','.join(artist['name'] for artist in song['ar']),
                     'album': song['al']['name'],
                     'picUrl': self.get_pic_url(song['al'].get('pic'))
                 })

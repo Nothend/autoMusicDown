@@ -263,7 +263,7 @@ class SongDownloader:
             tlyric = lyric_result.get('tlyric', {}).get('lyric', '') if lyric_result else ''
             
             # 构建艺术家字符串
-            artists = '&'.join(artist['name'] for artist in song_detail.get('ar', []))
+            artists = ','.join(artist['name'] for artist in song_detail.get('ar', []))
             # 提取发行时间（处理13位/11位时间戳）
             # 网易云API的album.publishTime为13位毫秒级时间戳
             publish_timestamp = alum_publisTime
