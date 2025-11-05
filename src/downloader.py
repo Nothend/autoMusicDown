@@ -263,7 +263,7 @@ class SongDownloader:
             tlyric = lyric_result.get('tlyric', {}).get('lyric', '') if lyric_result else ''
             
             # 构建艺术家字符串
-            artists = ','.join(artist['name'] for artist in song_detail.get('ar', []))
+            artists = '; '.join(artist['name'] for artist in song_detail.get('ar', []))
             # 提取发行时间（处理13位/11位时间戳）
             # 网易云API的album.publishTime为13位毫秒级时间戳
             publish_timestamp = alum_publisTime
@@ -319,7 +319,9 @@ class SongDownloader:
             
 
             # 生成可能的文件名
-            base_filename = f"{music_info.artists} - {music_info.name}"
+            # 用正则匹配分号及前后可能的空格，统一替换为 &
+            artists_joined = re.sub(r'\s*;\s*', '&', music_info.artists)  # 匹配分号及前后任意空格
+            base_filename = f"{artists_joined} - {music_info.name}"
             safe_filename = self._sanitize_filename(base_filename)
 
             file_ext = self._determine_file_extension(music_info.download_url)
@@ -560,8 +562,10 @@ class SongDownloader:
             下载结果对象
         """
         try:
-            # 生成文件名
-            filename = f"{music_info.artists} - {music_info.name}"
+            # 生成可能的文件名
+            # 用正则匹配分号及前后可能的空格，统一替换为 &
+            artists_joined = re.sub(r'\s*;\s*', '&', music_info.artists)  # 匹配分号及前后任意空格
+            filename = f"{artists_joined} - {music_info.name}"
             safe_filename = self._sanitize_filename(filename)
             
             # 确定文件扩展名
