@@ -408,6 +408,8 @@ class SongDownloader:
                 result = self.download_song(song_info, quality)
                 if result.success:
                     success_songs.append(song_info)
+                else:
+                    self.logger.warning(f"下载歌曲失败: {song_info.name} - {result.error_message}")
         
         self.logger.info(f"下载完成，成功 {len(success_songs)}/{len(songs)} 首")
         return success_songs
