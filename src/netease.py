@@ -440,6 +440,71 @@ class NeteaseMusic:
         return result
     
 
+    def is_cookie_valid(self) -> Dict[str, bool]:
+        """检查Cookie是否有效并判断是否为VIP
+        返回格式: {
+            'valid': bool,    # Cookie是否有效
+            'is_vip': bool    # 是否为VIP（vipType != 0 视为VIP）
+        }
+        """
+        try:
+            # 若未传入cookies，直接返回无效且非VIP
+            if not self.cookies:
+                return {'valid': False, 'is_vip': False}
+            
+            # 调用用户账号信息接口验证登录状态
+            headers = {
+                'User-Agent': APIConstants.USER_AGENT,
+                'Referer': APIConstants.REFERER
+            }
+            
+            # 发送请求（该接口无需复杂参数，仅需登录态Cookie）
+            response = requests.post(
+                APIConstants.USER_ACCOUNT_API,
+                headers=headers,
+                cookies=self.cookies,
+                timeout=30
+            )
+            response.raise_for_status()  # 抛出HTTP错误（如403、500等）
+            
+            result = response.json()
+            
+            # 验证响应：code=200且包含用户信息（profile字段）则视为有效
+            if result.get('code') == 200 and result.get('profile') is not None:
+                # 从account中获取vipType，默认为0（非VIP）
+                vip_type = result.get('account', {}).get('vipType', 0)
+                # 非0视为VIP
+                is_vip = vip_type != 0
+                return {'valid': True, 'is_vip': is_vip}
+            else:
+                # 无效Cookie，默认非VIP
+                if result.get('code') != 200:
+                    print(f"Cookie无效：响应码非200（实际：{result.get('code')}）")
+                else:
+                    print(f"Cookie无效：profile为None（{result.get('profile')}）")
+                return {'valid': False, 'is_vip': False}
+                
+        except requests.RequestException as e:
+            print(f"Cookie验证请求失败: {e}")
+            return {'valid': False, 'is_vip': False}
+        except json.JSONDecodeError as e:
+            print(f"解析验证响应失败: {e}")
+            return {'valid': False, 'is_vip': False}
+        except Exception as e:
+            print(f"Cookie验证发生未知错误: {e}")
+            return {'valid': False, 'is_vip': False}
+                
+        except requests.RequestException as e:
+            print(f"Cookie验证请求失败: {e}")
+            return False
+        except json.JSONDecodeError as e:
+            print(f"解析验证响应失败: {e}")
+            return False
+        except Exception as e:
+            print(f"Cookie验证发生未知错误: {e}")
+            return False
+    
+
     def get_pic_url(self, pic_id: Optional[int], size: int = 300) -> str:
         """获取网易云加密歌曲/专辑封面直链
         

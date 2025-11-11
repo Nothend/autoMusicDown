@@ -78,10 +78,18 @@ class MusicSyncApp:
         
         try:
             # 任务执行前再次检查Cookie有效性
-            # if not self.cookie_manager.is_cookie_valid():
-            #     self.logger.error("Cookie无效，无法执行任务")
-            #     self.bark.send_notification("音乐同步失败", "Cookie无效，请检查配置")
-            #     return
+            # 现在返回的是包含 'valid' 和 'is_vip' 的字典
+            cookie_result = self.NeteaseApi.is_cookie_valid()
+            
+            # 同时返回有效性和VIP状态
+            if not cookie_result['valid']:
+                self.logger.error("Cookie无效，任务终止")
+                self.bark.send_notification("云音乐同步失败", "Cookie无效，请检查配置")
+                return
+            if not cookie_result['is_vip']:
+                self.logger.warning("非VIP账号，部分高品质音乐可能无法下载")
+                self.bark.send_notification("云音乐同步警告", "非VIP账号，取消下载")
+                return
             
             # 1. 查找今日播放列表
             uid = self.config.get("uid")
