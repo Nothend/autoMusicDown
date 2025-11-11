@@ -60,6 +60,7 @@ class APIConstants:
     REFERER = 'https://music.163.com/'
     
     # API URLs
+    USER_ACCOUNT_API = "https://interface3.music.163.com/api/nuser/account/get"
     SONG_URL_V1 = "https://interface3.music.163.com/eapi/song/enhance/player/url/v1"
     SONG_DETAIL_V3 = "https://interface3.music.163.com/api/v3/song/detail"
     LYRIC_API = "https://interface3.music.163.com/api/song/lyric"
