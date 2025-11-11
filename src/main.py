@@ -143,6 +143,9 @@ class MusicSyncApp:
                         # 库中不存在，检查本地是否已下载
                         # 先获取歌曲详情
                         music_info=self.downloader.get_music_info(song_id, self.quality_level)
+                        if music_info.file_type=='mp3':
+                            self.logger.warning(f"歌曲 {title} 的下载信息获取到MP3格式，跳过该歌曲")
+                            continue
                         if music_info is None:
                             self.logger.warning(f"无法获取歌曲ID {song_id} 的下载信息，跳过该歌曲")
                             continue
@@ -167,6 +170,9 @@ class MusicSyncApp:
                         # 库中不存在，检查本地是否已下载
                         # 先获取歌曲详情
                         music_info=self.downloader.get_music_info(song_id, self.quality_level)
+                        if music_info.file_type=='mp3':
+                            self.logger.warning(f"歌曲 {title} 的下载信息获取到MP3格式，跳过该歌曲")
+                            continue
                         if music_info is None:
                             self.logger.warning(f"无法获取歌曲ID {song_id} 的下载信息，跳过该歌曲")
                             continue
@@ -182,6 +188,9 @@ class MusicSyncApp:
                     song_id = song.get("id")
                     # 先获取歌曲详情
                     music_info=self.downloader.get_music_info(song_id, self.quality_level)
+                    if music_info.file_type=='mp3':
+                            self.logger.warning(f"歌曲 {title} 的下载信息获取到MP3格式，跳过该歌曲")
+                            continue
                     if music_info is None:
                         self.logger.warning(f"无法获取歌曲ID {song_id} 的下载信息，跳过该歌曲")
                         continue
