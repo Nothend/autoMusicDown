@@ -64,7 +64,7 @@ class MusicSyncApp:
 
         # 初始化Navidrome客户端（如果启用）
         self.use_navidrome = config.is_enabled("NAVIDROME")
-        self.use_mysql = config.is_enabled("MYSQL")
+        self.use_mysql = config.is_enabled("MUSIC-TAG-WEB")
         
          # 设置日志
         

@@ -57,9 +57,9 @@ class Config:
             return nav_node.get('USE_NAVIDROME', False) is True
         
         # 处理MYSQL类型检查（配置中是小写mysql节点）
-        elif type_upper == 'MYSQL':
+        elif type_upper == 'MUSIC-TAG-WEB':
             # 检查是否存在mysql节点
-            mysql_node = self.config.get('mysql')
+            mysql_node = self.config.get('music-tag-web')
             if not mysql_node:
                 return False
             # 检查USE_MYSQL是否存在且为True
