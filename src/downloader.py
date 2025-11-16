@@ -151,7 +151,7 @@ class SongDownloader:
             filename = filename[:200]
         
         return filename or "unknown"
-    
+
     def _timestamp_str_to_date(self, timestamp_int: int) -> str:
         """
         将整数时间戳（10-13位）转换为YYYY-MM-DD格式
@@ -163,24 +163,28 @@ class SongDownloader:
             格式化后的日期字符串，转换失败返回空字符串
         """
         try:
-            # 1. 统一转换为毫秒级时间戳（根据实际值判断是否为秒级）
-            # 阈值：5e11毫秒 ≈ 1985年，小于该值的10-12位可能是秒级
-            if timestamp_int < 10**10:
-                # 小于10位：无效
-                return ""
-            elif timestamp_int < 5 * 10**11:
-                # 10-11位且小于5e11：视为秒级，转换为毫秒级（×1000）
-                timestamp_int *= 1000
-            # 12-13位且>=5e11：视为毫秒级，不转换（保持原数）
+            # 1. 按位数判断单位（优先逻辑，避免数值误判）
+            ts_str = str(timestamp_int)
+            ts_len = len(ts_str)
             
-            # 2. 验证时间范围（1970-01-01 ~ 2100-12-31）
+            if ts_len == 10:
+                # 10位：秒级 → 转为毫秒级
+                timestamp_ms = timestamp_int * 1000
+            elif 11 <= ts_len <= 13:
+                # 11-13位：毫秒级 → 直接使用
+                timestamp_ms = timestamp_int
+            else:
+                # 其他位数：无效
+                return ""
+            
+            # 2. 验证时间范围（1970-01-01 ~ 2100-12-31，毫秒级）
             min_ts = 0  # 1970-01-01 00:00:00（毫秒级）
-            max_ts = 4102444799000  # 2100-12-31 23:59:59（毫秒级，修正后的值）
-            if not (min_ts <= timestamp_int <= max_ts):
+            max_ts = 4102444799000  # 2100-12-31 23:59:59（毫秒级）
+            if not (min_ts <= timestamp_ms <= max_ts):
                 return ""
             
-            # 3. 转换为日期（毫秒级→秒级）
-            return datetime.fromtimestamp(timestamp_int / 1000).strftime("%Y-%m-%d")
+            # 3. 转换为日期（毫秒级→秒级，除以1000）
+            return datetime.fromtimestamp(timestamp_ms / 1000).strftime("%Y-%m-%d")
         
         except (ValueError, TypeError, OSError):
             return ""
