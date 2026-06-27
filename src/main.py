@@ -9,22 +9,19 @@ from netease import NeteaseMusic
 from downloader import SongDownloader
 from bark import BarkNotifier
 from logger import setup_logger
-# 导入Cookie管理器
-from cookie_manager import CookieManager
 from library import make_library_checker
-from utils import quality_display_name
+from utils import parse_cookie, quality_display_name
 
 
 class MusicSyncApp:
     def __init__(self, config: Config):
         self.config = config
-        # 初始化Cookie管理器
-        self.cookie_manager = CookieManager(config)
-        # 初始化组件
+        # 解析配置中的 cookie 字符串为 dict
+        self.parsed_cookies = parse_cookie(config.get("cookie"))
 
-        self.NeteaseApi = NeteaseMusic(self.cookie_manager.parsed_cookies)
+        self.NeteaseApi = NeteaseMusic(self.parsed_cookies)
         # 下载器复用同一个 NeteaseMusic 实例，避免重复构造、保持请求来源一致
-        self.downloader = SongDownloader(self.cookie_manager.parsed_cookies, self.NeteaseApi)
+        self.downloader = SongDownloader(self.parsed_cookies, self.NeteaseApi)
         self.bark = BarkNotifier(config.get("BARK_API", ""))
 
         self.quality_level = config.get("QUALITY_LEVEL", "lossless")

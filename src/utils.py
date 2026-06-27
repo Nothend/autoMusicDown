@@ -1,7 +1,10 @@
 """通用工具函数：被多个模块共享的纯函数（无外部依赖、无状态）。"""
 
+import logging
 from datetime import datetime
-from typing import Union
+from typing import Dict, Union
+
+logger = logging.getLogger(__name__)
 
 
 # 时间范围上限：2100-12-31 23:59:59（毫秒级）
@@ -63,3 +66,29 @@ def format_file_size(size_bytes: int) -> str:
 def quality_display_name(quality: str) -> str:
     """音质等级 -> 简短中文名，未知则原样返回。"""
     return QUALITY_DISPLAY_NAMES.get(quality, "未知品质")
+
+
+def parse_cookie(cookie_str: str) -> Dict[str, str]:
+    """把 cookie 字符串解析成 dict（支持分号或换行分隔，按第一个 = 切分）。"""
+    if not cookie_str or not cookie_str.strip():
+        logger.warning("Cookie 字符串为空，返回空字典")
+        return {}
+
+    cookie_str = cookie_str.strip()
+    if ';' in cookie_str:
+        pairs = cookie_str.split(';')
+    elif '\n' in cookie_str:
+        pairs = cookie_str.split('\n')
+    else:
+        pairs = [cookie_str]
+
+    cookies: Dict[str, str] = {}
+    for pair in pairs:
+        pair = pair.strip()
+        if not pair or '=' not in pair:
+            continue
+        key, value = pair.split('=', 1)
+        key, value = key.strip(), value.strip()
+        if key and value:
+            cookies[key] = value
+    return cookies
