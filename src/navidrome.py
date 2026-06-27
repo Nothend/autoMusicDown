@@ -3,6 +3,8 @@ import requests
 import logging
 from typing import Dict
 
+from utils import format_file_size
+
 class NavidromeClient:
     def __init__(self, host: str, username: str, password: str):
         self.navidrome_host = host
@@ -59,35 +61,6 @@ class NavidromeClient:
             return int(raw_size)
         except (ValueError, TypeError):
             return 0
-    
-    def _format_file_size(self, size_bytes: int) -> str:
-        """格式化文件大小"""
-        if size_bytes == 0:
-            return "0B"
-        
-        units = ["B", "KB", "MB", "GB", "TB"]
-        size = float(size_bytes)
-        unit_index = 0
-        
-        while size >= 1024.0 and unit_index < len(units) - 1:
-            size /= 1024.0
-            unit_index += 1
-        
-        return f"{size:.2f}{units[unit_index]}"
-
-
-    def _authenticate(self) -> None:
-        """进行身份验证"""
-        try:
-            response = self.session.post(
-                f"{self.host}/api/login",
-                json={"username": self.username, "password": self.password}
-            )
-            response.raise_for_status()
-            self.logger.info("Navidrome 认证成功")
-        except Exception as e:
-            self.logger.error(f"Navidrome 认证失败: {str(e)}")
-            raise
     
     def navidrome_song_exists(self, title: str, artists: list, album: str) -> dict:  # 注意：参数类型标注改为 list
         """
@@ -196,7 +169,7 @@ class NavidromeClient:
 
                 # 4. 非MP3格式且匹配，返回存在
                 file_size = self._get_file_size(item)
-                size_formatted = self._format_file_size(file_size) if file_size else ""
+                size_formatted = format_file_size(file_size) if file_size else ""
                 album_match = (album_target == nav_album) if album_target else True
 
                 # 日志优化：将艺术家列表转为字符串显示

@@ -37,7 +37,7 @@ class CookieManager:
 
         """初始化Cookie管理器（无文件依赖）"""
         self.cookie_string: str = "" # 存储原始Cookie字符串
-        self.parsed_cookies: Dict[str, str] = []  # 解析后的Cookie字典
+        self.parsed_cookies: Dict[str, str] = {}  # 解析后的Cookie字典
         self.set_cookie_string(config.get("cookie"))
         
         
@@ -121,7 +121,7 @@ class CookieManager:
         Returns:
             是否格式有效
         """
-        target_str = cookie_string.strip() if cookie_string else self._cookie_string
+        target_str = cookie_string.strip() if cookie_string else self.cookie_string
         if not target_str:
             self.logger.warning("Cookie字符串为空，格式无效")
             return False
@@ -152,18 +152,18 @@ class CookieManager:
         Returns:
             Cookie是否有效
         """
-        if not self._parsed_cookies:
+        if not self.parsed_cookies:
             self.logger.warning("Cookie未解析或为空，无效")
             return False
         
         # 检查重要Cookie字段是否存在
-        missing = self.important_cookies - set(self._parsed_cookies.keys())
+        missing = self.important_cookies - set(self.parsed_cookies.keys())
         if missing:
             self.logger.warning(f"缺少重要Cookie字段: {missing}")
             return False
         
         # 基础验证MUSIC_U有效性
-        music_u = self._parsed_cookies.get('MUSIC_U', '')
+        music_u = self.parsed_cookies.get('MUSIC_U', '')
         if not music_u or len(music_u) < 10:
             self.logger.warning("MUSIC_U字段无效（过短或为空）")
             return False
@@ -180,11 +180,11 @@ class CookieManager:
             包含Cookie状态的字典
         """
         return {
-            'cookie_length': len(self._cookie_string),
-            'parsed_count': len(self._parsed_cookies),
+            'cookie_length': len(self.cookie_string),
+            'parsed_count': len(self.parsed_cookies),
             'is_valid': self.is_cookie_valid(),
-            'important_present': list(self.important_cookies & set(self._parsed_cookies.keys())),
-            'important_missing': list(self.important_cookies - set(self._parsed_cookies.keys())),
+            'important_present': list(self.important_cookies & set(self.parsed_cookies.keys())),
+            'important_missing': list(self.important_cookies - set(self.parsed_cookies.keys())),
             'last_updated': datetime.now().isoformat()
         }
     

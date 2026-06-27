@@ -1,50 +1,18 @@
 from datetime import datetime
 import logging
 import os
-from typing import Dict, List, Any, Optional, Tuple
+import time
+from typing import List
 
 from config import Config
 from netease import NeteaseMusic
-from netease import (
-        NeteaseMusic
-    )
-from navidrome import NavidromeClient
 from downloader import SongDownloader
 from bark import BarkNotifier
 from logger import setup_logger
 # 导入Cookie管理器
 from cookie_manager import CookieManager
-from mysql_check import MySQLChecker
-
-
-class APIResponse:
-    """API响应工具类"""
-    
-    @staticmethod
-    def success(data: Any = None, message: str = 'success', status_code: int = 200) -> Tuple[Dict[str, Any], int]:
-        """成功响应"""
-        response = {
-            'status': status_code,
-            'success': True,
-            'message': message
-        }
-        if data is not None:
-            response['data'] = data
-        return response, status_code
-    
-    @staticmethod
-    def error(message: str, status_code: int = 400, error_code: str = None) -> Tuple[Dict[str, Any], int]:
-        """错误响应"""
-        response = {
-            'status': status_code,
-            'success': False,
-            'message': message
-        }
-        if error_code:
-            response['error_code'] = error_code
-        return response, status_code
-
-
+from library import make_library_checker
+from utils import quality_display_name
 
 
 class MusicSyncApp:
@@ -55,23 +23,41 @@ class MusicSyncApp:
         # 初始化组件
 
         self.NeteaseApi = NeteaseMusic(self.cookie_manager.parsed_cookies)
-        # 从配置获取下载目录并初始化下载器
-        self.downloader = SongDownloader(self.cookie_manager.parsed_cookies)  # 传入下载目录
+        # 下载器复用同一个 NeteaseMusic 实例，避免重复构造、保持请求来源一致
+        self.downloader = SongDownloader(self.cookie_manager.parsed_cookies, self.NeteaseApi)
         self.bark = BarkNotifier(config.get("BARK_API", ""))
-        
+
         self.quality_level = config.get("QUALITY_LEVEL", "lossless")
+        # 每首歌处理之间的间隔（秒），默认 0.5s，可在 config.yaml 用 REQUEST_DELAY 调整
+        self.request_delay = float(config.get("REQUEST_DELAY", 0.5))
+        # 库检查后端在 run_task 里按需创建（避免 cookie 无效时白开数据库连接）
+        self.library_checker = None
 
-
-        # 初始化Navidrome客户端（如果启用）
-        self.use_navidrome = config.is_enabled("NAVIDROME")
-        self.use_mysql = config.is_enabled("MUSIC-TAG-WEB")
-        
-         # 设置日志
-        
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"下载目录已设置为: /app/downloads")
-        self.logger.info(f"下载音乐品质已设置为: { {"standard": "标准", "exhigh": "极高", "lossless": "无损", "hires": "Hi-Res", "sky": "沉浸环绕声", "jyeffect": "高清环绕声", "jymaster": "超清母带"}.get (self.quality_level, "未知品质")}")
-    
+        self.logger.info(f"下载目录已设置为: {self.downloader.download_dir}")
+        self.logger.info(f"下载音乐品质已设置为: {quality_display_name(self.quality_level)}")
+
+    def _exists_in_library(self, title: str, artists: List[str], album: str) -> bool:
+        """歌曲是否已在音乐库中（未启用任何后端则恒为 False）"""
+        if self.library_checker is None:
+            return False
+        return self.library_checker.exists(title, artists, album)
+
+    def _resolve_music_info(self, song_id: int, title: str):
+        """获取歌曲下载信息，统一处理获取失败 / MP3 跳过；返回 MusicInfo 或 None（表示跳过）"""
+        try:
+            music_info = self.downloader.get_music_info(song_id, self.quality_level)
+        except Exception as e:
+            self.logger.warning(f"无法获取歌曲《{title}》(ID {song_id}) 的下载信息，跳过：{e}")
+            return None
+        if music_info is None:
+            self.logger.warning(f"无法获取歌曲《{title}》(ID {song_id}) 的下载信息，跳过")
+            return None
+        if music_info.file_type == 'mp3':
+            self.logger.warning(f"歌曲《{title}》获取到 MP3 格式，跳过该歌曲")
+            return None
+        return music_info
+
     def run_task(self) -> None:
         """执行同步任务"""
         self.logger.info("开始执行音乐同步任务")
@@ -127,78 +113,40 @@ class MusicSyncApp:
             library_exists_count = 0  # 统计2：库中已存在的歌曲数（Navidrome/MySQL）
             local_exists_count = 0    # 统计3：本地已下载的歌曲数
             
-            if self.use_navidrome:
-                self.logger.info("启用Navidrome检查，筛选不在库中的歌曲")
-                self.navidrome=NavidromeClient(self.config.get_nested("NAVIDROME.NAVIDROME_HOST"),self.config.get_nested("NAVIDROME.NAVIDROME_USER"),self.config.get_nested("NAVIDROME.NAVIDROME_PASS"))
+            # 按配置创建库去重后端（Navidrome / music-tag-web / 无）
+            self.library_checker = make_library_checker(self.config)
+
+            try:
                 for song in songs:
                     title = song.get("name")
-                    artists = song.get("artists", "")
+                    artists = song.get("artists", [])
                     album = song.get("album", "")
                     song_id = song.get("id")
-                    
-                    exists = self.navidrome.navidrome_song_exists(title, artists, album)
-                    if exists.get("exists", False):
+
+                    # 1) 先查库（Navidrome / music-tag-web），命中则跳过
+                    if self._exists_in_library(title, artists, album):
                         library_exists_count += 1
-                    else:
-                        # 库中不存在，检查本地是否已下载
-                        # 先获取歌曲详情
-                        music_info=self.downloader.get_music_info(song_id, self.quality_level)
-                        if music_info.file_type=='mp3':
-                            self.logger.warning(f"歌曲 {title} 的下载信息获取到MP3格式，跳过该歌曲")
-                            continue
-                        if music_info is None:
-                            self.logger.warning(f"无法获取歌曲ID {song_id} 的下载信息，跳过该歌曲")
-                            continue
-                        else:
-                            if self.downloader.is_song_already_downloaded(music_info):
-                                local_exists_count += 1
-                            else:
-                                songs_to_download.append(music_info)
-            elif self.use_mysql:
-                self.logger.info("启用MySQLe检查，筛选不在库中的歌曲")
-                self.mysql_checker=MySQLChecker(self.config)
-                self.mysql_checker.open_connection()
-                for song in songs:
-                    title = song.get("name")
-                    artists = song.get("artists", "")
-                    album = song.get("album", "")
-                    song_id = song.get("id")
-                    exists = self.mysql_checker.check_song(title, artists)
-                    if exists:
-                        library_exists_count += 1
-                    else:
-                        # 库中不存在，检查本地是否已下载
-                        # 先获取歌曲详情
-                        music_info=self.downloader.get_music_info(song_id, self.quality_level)
-                        if music_info.file_type=='mp3':
-                            self.logger.warning(f"歌曲 {title} 的下载信息获取到MP3格式，跳过该歌曲")
-                            continue
-                        if music_info is None:
-                            self.logger.warning(f"无法获取歌曲ID {song_id} 的下载信息，跳过该歌曲")
-                            continue
-                        else:
-                            if self.downloader.is_song_already_downloaded(music_info):
-                                local_exists_count += 1
-                            else:
-                                songs_to_download.append(music_info)
-                self.mysql_checker.close_connection()
-            else:
-                self.logger.info("未启用任何检查，仅检查本地是否已下载")
-                for song in songs:
-                    song_id = song.get("id")
-                    # 先获取歌曲详情
-                    music_info=self.downloader.get_music_info(song_id, self.quality_level)
-                    if music_info.file_type=='mp3':
-                            self.logger.warning(f"歌曲 {title} 的下载信息获取到MP3格式，跳过该歌曲")
-                            continue
-                    if music_info is None:
-                        self.logger.warning(f"无法获取歌曲ID {song_id} 的下载信息，跳过该歌曲")
                         continue
+
+                    # 2) 获取下载信息（统一处理获取失败 / MP3 跳过）
+                    music_info = self._resolve_music_info(song_id, title)
+                    if music_info is None:
+                        continue
+
+                    # 3) 库中没有，再看本地是否已下载
+                    if self.downloader.is_song_already_downloaded(music_info):
+                        local_exists_count += 1
                     else:
-                        if self.downloader.is_song_already_downloaded(music_info):
-                            local_exists_count += 1  # 本地已存在
-                        else:
-                            songs_to_download.append(music_info)
+                        songs_to_download.append(music_info)
+
+                    # 轻微节流，避免一轮任务对接口造成突发请求
+                    if self.request_delay > 0:
+                        time.sleep(self.request_delay)
+            finally:
+                # 确保后端资源释放（如 MySQL 连接），即便中途异常
+                if self.library_checker is not None:
+                    self.library_checker.close()
+
             # 统计4：应下载的歌曲数
             should_download = len(songs_to_download)
             # 发送【筛选阶段】统计通知

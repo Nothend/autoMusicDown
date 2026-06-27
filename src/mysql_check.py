@@ -15,7 +15,7 @@ class MySQLConfig:
 
     def _validate_config(self) -> None:
         """验证MySQL配置是否存在必要项"""
-        mysql_config = self.config.get("mysql", {})
+        mysql_config = self.config.get("music-tag-web", {})
         required_keys = ["host", "port", "user", "password", "database"]
         missing_keys = [key for key in required_keys if key not in mysql_config]
         if missing_keys:
@@ -25,27 +25,27 @@ class MySQLConfig:
     @property
     def host(self) -> str:
         """获取数据库主机地址"""
-        return self.config.get("mysql", {}).get("host", "")
+        return self.config.get("music-tag-web", {}).get("host", "")
 
     @property
     def port(self) -> int:
         """获取数据库端口"""
-        return self.config.get("mysql", {}).get("port", 3306)
+        return self.config.get("music-tag-web", {}).get("port", 3306)
 
     @property
     def user(self) -> str:
         """获取数据库用户名"""
-        return self.config.get("mysql", {}).get("user", "root")
+        return self.config.get("music-tag-web", {}).get("user", "root")
 
     @property
     def password(self) -> str:
         """获取数据库密码"""
-        return self.config.get("mysql", {}).get("password", "")
+        return self.config.get("music-tag-web", {}).get("password", "")
 
     @property
     def database(self) -> str:
         """获取数据库名称"""
-        return self.config.get("mysql", {}).get("database", "music_tag")
+        return self.config.get("music-tag-web", {}).get("database", "music_tag")
 
 
 class MySQLChecker:

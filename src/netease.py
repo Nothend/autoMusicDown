@@ -6,50 +6,35 @@ import urllib.parse
 from random import randrange
 from typing import Dict, List, Optional, Tuple, Any
 from hashlib import md5
-from enum import Enum
 
-from aiohttp import request
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from utils import timestamp_to_date
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from datetime import datetime
 
-class QualityLevel(Enum):
-    """音质等级枚举"""
-    STANDARD = "standard"      # 标准音质
-    EXHIGH = "exhigh"          # 极高音质
-    LOSSLESS = "lossless"      # 无损音质
-    HIRES = "hires"            # Hi-Res音质
-    SKY = "sky"                # 沉浸环绕声
-    JYEFFECT = "jyeffect"      # 高清环绕声
-    JYMASTER = "jymaster"      # 超清母带
+# 全局共享 Session：网易云的反作弊会通过 Set-Cookie 下发设备 cookie（如 NMTID），
+# song/url 接口要求请求带上这些 cookie，否则返回 -462「网络环境存在风险」。
+# 用同一个 Session 让前序请求（账号校验、取歌单等）拿到的 cookie 自动延续到后续请求。
+SESSION = requests.Session()
 
-class APIResponse:
-    """API响应工具类"""
-    
-    @staticmethod
-    def success(data: Any = None, message: str = 'success', status_code: int = 200) -> Tuple[Dict[str, Any], int]:
-        """成功响应"""
-        response = {
-            'status': status_code,
-            'success': True,
-            'message': message
-        }
-        if data is not None:
-            response['data'] = data
-        return response, status_code
-    
-    @staticmethod
-    def error(message: str, status_code: int = 400, error_code: str = None) -> Tuple[Dict[str, Any], int]:
-        """错误响应"""
-        response = {
-            'status': status_code,
-            'success': False,
-            'message': message
-        }
-        if error_code:
-            response['error_code'] = error_code
-        return response, status_code
+# 限流/容错：单次任务会对 30 首歌各打 4 个接口（url/detail/album/lyric），属于突发请求。
+# 给 Session 挂上重试适配器，遇到 429/5xx 自动按退避重试，并遵守服务端的 Retry-After 头，
+# 降低被限流（429）或重新触发风控的概率。
+_RETRY = Retry(
+    total=3,
+    backoff_factor=1.5,                       # 退避间隔：1.5s, 3s, 6s
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset(["GET", "POST"]),
+    respect_retry_after_header=True,
+    raise_on_status=False,
+)
+_ADAPTER = HTTPAdapter(max_retries=_RETRY)
+SESSION.mount("https://", _ADAPTER)
+SESSION.mount("http://", _ADAPTER)
 
 
 # 常量定义
@@ -140,7 +125,7 @@ class HTTPClient:
         request_cookies.update(cookies)
         
         try:
-            response = requests.post(url, headers=headers, cookies=request_cookies, 
+            response = SESSION.post(url, headers=headers, cookies=request_cookies, 
                                    data={"params": params}, timeout=30)
             response.raise_for_status()
             return response.text
@@ -159,7 +144,7 @@ class HTTPClient:
         request_cookies.update(cookies)
         
         try:
-            response = requests.post(url, headers=headers, cookies=request_cookies, 
+            response = SESSION.post(url, headers=headers, cookies=request_cookies, 
                                    data={"params": params}, timeout=30)
             response.raise_for_status()
             return response
@@ -220,7 +205,7 @@ class NeteaseMusic:
             }
             
             # 发送POST请求
-            response = requests.post(
+            response = SESSION.post(
                 url=APIConstants.PERSONAL_PLAYLIST_API,
                 data=data,
                 headers=headers,
@@ -243,8 +228,8 @@ class NeteaseMusic:
             # 遍历处理每个歌单
             for playlist in playlists:
                 # 转换时间戳（使用类内时间转换方法）
-                update_time = self._timestamp_str_to_date(playlist.get('updateTime', ''))
-                track_update_time = self._timestamp_str_to_date(playlist.get('trackUpdateTime', ''))
+                update_time = timestamp_to_date(playlist.get('updateTime', ''))
+                track_update_time = timestamp_to_date(playlist.get('trackUpdateTime', ''))
                 
                 # 封装处理后的歌单信息
                 processed_playlist = {
@@ -289,7 +274,7 @@ class NeteaseMusic:
                 'Referer': APIConstants.REFERER
             }
             
-            response = requests.post(APIConstants.PLAYLIST_DETAIL_API, data=data, 
+            response = SESSION.post(APIConstants.PLAYLIST_DETAIL_API, data=data, 
                                    headers=headers, cookies=cookies, timeout=30)
             response.raise_for_status()
             
@@ -301,7 +286,7 @@ class NeteaseMusic:
             # 网易云API的album.publishTime为13位毫秒级时间戳
             create_timestamp = playlist.get('createTime')
             # 转换为年月日格式（调用工具函数）
-            create_time = self._timestamp_str_to_date(create_timestamp)
+            create_time = timestamp_to_date(create_timestamp)
             info = {
                 'id': playlist.get('id'),
                 'name': playlist.get('name'),
@@ -319,7 +304,7 @@ class NeteaseMusic:
                 batch_ids = track_ids[i:i+100]
                 song_data = {'c': json.dumps([{'id': int(sid), 'v': 0} for sid in batch_ids])}
                 
-                song_resp = requests.post(APIConstants.SONG_DETAIL_V3, data=song_data, 
+                song_resp = SESSION.post(APIConstants.SONG_DETAIL_V3, data=song_data, 
                                         headers=headers, cookies=cookies, timeout=30)
                 song_resp.raise_for_status()
                 
@@ -359,7 +344,7 @@ class NeteaseMusic:
                 'Referer': APIConstants.REFERER
             }
             
-            response = requests.get(url, headers=headers, cookies=cookies, timeout=30)
+            response = SESSION.get(url, headers=headers, cookies=cookies, timeout=30)
             response.raise_for_status()
             
             result = response.json()
@@ -460,7 +445,7 @@ class NeteaseMusic:
             }
             
             # 发送请求（该接口无需复杂参数，仅需登录态Cookie）
-            response = requests.post(
+            response = SESSION.post(
                 APIConstants.USER_ACCOUNT_API,
                 headers=headers,
                 cookies=self.cookies,
@@ -494,17 +479,6 @@ class NeteaseMusic:
         except Exception as e:
             print(f"Cookie验证发生未知错误: {e}")
             return {'valid': False, 'is_vip': False}
-                
-        except requests.RequestException as e:
-            print(f"Cookie验证请求失败: {e}")
-            return False
-        except json.JSONDecodeError as e:
-            print(f"解析验证响应失败: {e}")
-            return False
-        except Exception as e:
-            print(f"Cookie验证发生未知错误: {e}")
-            return False
-    
 
     def get_pic_url(self, pic_id: Optional[int], size: int = 300) -> str:
         """获取网易云加密歌曲/专辑封面直链
@@ -523,39 +497,6 @@ class NeteaseMusic:
         return f'https://p3.music.126.net/{enc_id}/{pic_id}.jpg?param={size}y{size}'
 
     
-    def _timestamp_str_to_date(self, timestamp_int: int) -> str:
-        """
-        将整数时间戳（10-13位）转换为YYYY-MM-DD格式
-        
-        Args:
-            timestamp_int: 整数时间戳（如1305388800（10位秒级）、984240000007（12位毫秒级）、1620000000000（13位毫秒级））
-            
-        Returns:
-            格式化后的日期字符串，转换失败返回空字符串
-        """
-        try:
-            # 1. 统一转换为毫秒级时间戳（根据实际值判断是否为秒级）
-            # 阈值：5e11毫秒 ≈ 1985年，小于该值的10-12位可能是秒级
-            if timestamp_int < 10**10:
-                # 小于10位：无效
-                return ""
-            elif timestamp_int < 5 * 10**11:
-                # 10-11位且小于5e11：视为秒级，转换为毫秒级（×1000）
-                timestamp_int *= 1000
-            # 12-13位且>=5e11：视为毫秒级，不转换（保持原数）
-            
-            # 2. 验证时间范围（1970-01-01 ~ 2100-12-31）
-            min_ts = 0  # 1970-01-01 00:00:00（毫秒级）
-            max_ts = 4102444799000  # 2100-12-31 23:59:59（毫秒级，修正后的值）
-            if not (min_ts <= timestamp_int <= max_ts):
-                return ""
-            
-            # 3. 转换为日期（毫秒级→秒级）
-            return datetime.fromtimestamp(timestamp_int / 1000).strftime("%Y-%m-%d")
-        
-        except (ValueError, TypeError, OSError):
-            return ""
-
     def get_song_url(self, song_id: int, quality: str, cookies: Dict[str, str]) -> Dict[str, Any]:
         """获取歌曲播放URL
         
@@ -609,7 +550,7 @@ class NeteaseMusic:
         """
         try:
             data = {'c': json.dumps([{"id": song_id, "v": 0}])}
-            response = requests.post(APIConstants.SONG_DETAIL_V3, data=data, timeout=30)
+            response = SESSION.post(APIConstants.SONG_DETAIL_V3, data=data, timeout=30)
             response.raise_for_status()
             
             result = response.json()
@@ -653,7 +594,7 @@ class NeteaseMusic:
                 'Referer': APIConstants.REFERER
             }
             
-            response = requests.post(APIConstants.LYRIC_API, data=data, 
+            response = SESSION.post(APIConstants.LYRIC_API, data=data, 
                                    headers=headers, cookies=cookies, timeout=30)
             response.raise_for_status()
             
@@ -666,100 +607,6 @@ class NeteaseMusic:
             raise APIException(f"获取歌词请求失败: {e}")
         except json.JSONDecodeError as e:
             raise APIException(f"解析歌词响应失败: {e}")
-        
-    def _get_quality_display_name(self, quality: str) -> str:
-        """获取音质显示名称"""
-        quality_names = {
-            'standard': "标准音质",
-            'exhigh': "极高音质", 
-            'lossless': "无损音质",
-            'hires': "Hi-Res音质",
-            'sky': "沉浸环绕声",
-            'jyeffect': "高清环绕声",
-            'jymaster': "超清母带"
-        }
-        return quality_names.get(quality, f"未知音质({quality})")
-    
-    def _format_file_size(self, size_bytes: int) -> str:
-        """格式化文件大小"""
-        if size_bytes == 0:
-            return "0B"
-        
-        units = ["B", "KB", "MB", "GB", "TB"]
-        size = float(size_bytes)
-        unit_index = 0
-        
-        while size >= 1024.0 and unit_index < len(units) - 1:
-            size /= 1024.0
-            unit_index += 1
-        
-        return f"{size:.2f}{units[unit_index]}"
-    
-    def _get_quality_display_name(self, quality: str) -> str:
-        """获取音质显示名称"""
-        quality_names = {
-            'standard': "标准音质",
-            'exhigh': "极高音质", 
-            'lossless': "无损音质",
-            'hires': "Hi-Res音质",
-            'sky': "沉浸环绕声",
-            'jyeffect': "高清环绕声",
-            'jymaster': "超清母带"
-        }
-        return quality_names.get(quality, f"未知音质({quality})")
-    
-    def _validate_request_params(self, required_params: Dict[str, Any]) -> Optional[Tuple[Dict[str, Any], int]]:
-        """验证请求参数"""
-        for param_name, param_value in required_params.items():
-            if not param_value:
-                return APIResponse.error(f"参数 '{param_name}' 不能为空", 400)
-        return None
-    
-    # 向后兼容的函数接口
-def url_v1(song_id: int, level: str, cookies: Dict[str, str]) -> Dict[str, Any]:
-    """获取歌曲URL（向后兼容）"""
-    api = NeteaseMusic()
-    return api.get_song_url(song_id, level, cookies)
-
-
-def name_v1(song_id: int) -> Dict[str, Any]:
-    """获取歌曲详情（向后兼容）"""
-    api = NeteaseMusic()
-    return api.get_song_detail(song_id)
-
-
-def lyric_v1(song_id: int, cookies: Dict[str, str]) -> Dict[str, Any]:
-    """获取歌词（向后兼容）"""
-    api = NeteaseMusic()
-    return api.get_lyric(song_id, cookies)
-
-def search_music(keywords: str, cookies: Dict[str, str], limit: int = 10) -> List[Dict[str, Any]]:
-    """搜索音乐（向后兼容）"""
-    api = NeteaseMusic()
-    return api.search_music(keywords, cookies, limit)
-
-
-def playlist_detail(playlist_id: int, cookies: Dict[str, str]) -> Dict[str, Any]:
-    """获取歌单详情（向后兼容）"""
-    api = NeteaseMusic()
-    return api.get_playlist_detail(playlist_id, cookies)
-
-def user_playlist(uid: int, cookies: Dict[str, str]) -> Dict[str, Any]:
-    """获取用户（向后兼容）"""
-    api = NeteaseMusic()
-    return api.get_user_playlist(uid, cookies)
-
-
-def album_detail(album_id: int, cookies: Dict[str, str]) -> Dict[str, Any]:
-    """获取专辑详情（向后兼容）"""
-    api = NeteaseMusic()
-    return api.get_album_detail(album_id, cookies)
-
-
-def get_pic_url(pic_id: Optional[int], size: int = 300) -> str:
-    """获取图片URL（向后兼容）"""
-    api = NeteaseMusic()
-    return api.get_pic_url(pic_id, size)
 
 
 
