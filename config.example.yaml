@@ -41,3 +41,6 @@ music-tag-web:
   database: music_tag
 # Bark通知配置
 BARK_API: "https://api.day.app/your_key/"
+
+# 可选：处理每首歌之间的间隔秒数（默认 0.5，降低被网易云限流的概率；想更快可设为 0）
+REQUEST_DELAY: 0.5
