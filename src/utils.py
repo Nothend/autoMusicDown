@@ -49,20 +49,6 @@ def timestamp_to_date(timestamp: Union[int, str, None]) -> str:
         return ""
 
 
-def format_file_size(size_bytes: int) -> str:
-    """将字节数格式化为带单位的字符串，如 37.74MB。"""
-    if not size_bytes:
-        return "0B"
-
-    units = ["B", "KB", "MB", "GB", "TB"]
-    size = float(size_bytes)
-    unit_index = 0
-    while size >= 1024.0 and unit_index < len(units) - 1:
-        size /= 1024.0
-        unit_index += 1
-    return f"{size:.2f}{units[unit_index]}"
-
-
 def quality_display_name(quality: str) -> str:
     """音质等级 -> 简短中文名，未知则原样返回。"""
     return QUALITY_DISPLAY_NAMES.get(quality, "未知品质")

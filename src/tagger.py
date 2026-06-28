@@ -12,13 +12,37 @@ from PIL import Image
 from mutagen.flac import FLAC, Picture
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, APIC, TYER, USLT
-from mutagen.mp4 import MP4
+from mutagen.mp4 import MP4, MP4Cover
 
 from models import MusicInfo
 
 logger = logging.getLogger(__name__)
 
 _MAX_COVER_SIZE = 5 * 1024 * 1024  # 封面超过 5MB 自动压缩
+
+
+def _cover_mime(data: bytes) -> str:
+    """按字节魔数判断封面 MIME（JPEG/PNG），默认 PNG。"""
+    return 'image/jpeg' if data[:2] == b'\xff\xd8' else 'image/png'
+
+
+def _fetch_cover(pic_url: str) -> bytes | None:
+    """下载封面并按需压缩到 _MAX_COVER_SIZE 以内；下载/压缩失败均返回 None。"""
+    try:
+        resp = requests.get(pic_url, timeout=10)
+        resp.raise_for_status()
+        data = resp.content
+        if len(data) > _MAX_COVER_SIZE:
+            logger.debug(f"封面过大（{len(data)} 字节），开始压缩...")
+            data = compress_image(data, _MAX_COVER_SIZE)
+            if not data:
+                logger.warning("压缩后仍超过上限，跳过封面")
+                return None
+            logger.debug(f"压缩后大小: {len(data)} 字节")
+        return data
+    except Exception as e:
+        logger.warning(f"封面下载失败: {e}")
+        return None
 
 
 def write_tags(file_path: Path, music_info: MusicInfo) -> None:
@@ -73,32 +97,15 @@ def _write_mp3_tags(file_path: Path, music_info: MusicInfo) -> None:
         audio.save()
         logger.debug(f"已保存MP3基础标签: {file_path.name}")
 
-        # ---------------------- 2. 处理图片（>5MB自动压缩） ----------------------
+        # ---------------------- 2. 处理封面（>5MB 自动压缩） ----------------------
         if music_info.pic_url:
-            try:
-                pic_response = requests.get(music_info.pic_url, timeout=10)
-                pic_response.raise_for_status()
-                image_data = pic_response.content
-                original_size = len(image_data)
-
-                if original_size > _MAX_COVER_SIZE:
-                    logger.debug(f"MP3图片过大（{original_size}字节），开始压缩...")
-                    compressed_data = compress_image(image_data, _MAX_COVER_SIZE)
-                    if not compressed_data:
-                        logger.warning("压缩后仍超过5MB，跳过封面")
-                        return
-                    image_data = compressed_data
-                    logger.debug(f"压缩后大小: {len(image_data)}字节")
-
-                mime_type = pic_response.headers.get('content-type', 'image/jpeg')
+            cover = _fetch_cover(music_info.pic_url)
+            if cover:
                 audio.tags.setall('APIC', [APIC(
-                    encoding=3, mime=mime_type, type=3, desc='Cover', data=image_data
+                    encoding=3, mime=_cover_mime(cover), type=3, desc='Cover', data=cover
                 )])
                 audio.save()
                 logger.debug("已添加MP3封面并保存")
-
-            except Exception as e:
-                logger.warning(f"MP3封面处理失败（不影响其他标签）: {str(e)}")
 
     except Exception as e:
         logger.error(f"MP3基础标签处理失败: {str(e)}")
@@ -133,34 +140,18 @@ def _write_flac_tags(file_path: Path, music_info: MusicInfo) -> None:
         audio.save()
         logger.debug(f"已保存FLAC基础标签: {file_path.name}")
 
-        # ---------------------- 2. 处理图片（>5MB自动压缩） ----------------------
+        # ---------------------- 2. 处理封面（>5MB 自动压缩） ----------------------
         if music_info.pic_url:
-            try:
-                pic_response = requests.get(music_info.pic_url, timeout=10)
-                pic_response.raise_for_status()
-                image_data = pic_response.content
-                original_size = len(image_data)
-
-                if original_size > _MAX_COVER_SIZE:
-                    logger.debug(f"FLAC图片过大（{original_size}字节），开始压缩...")
-                    compressed_data = compress_image(image_data, _MAX_COVER_SIZE)
-                    if not compressed_data:
-                        logger.warning("压缩后仍超过5MB，跳过封面")
-                        return
-                    image_data = compressed_data
-                    logger.debug(f"压缩后大小: {len(image_data)}字节")
-
+            cover = _fetch_cover(music_info.pic_url)
+            if cover:
                 picture = Picture()
                 picture.type = 3
-                picture.mime = 'image/jpeg' if image_data.startswith(b'\xff\xd8') else 'image/png'
+                picture.mime = _cover_mime(cover)
                 picture.desc = 'Cover'
-                picture.data = image_data
+                picture.data = cover
                 audio.add_picture(picture)
                 audio.save()
                 logger.debug("已添加FLAC封面并保存")
-
-            except Exception as e:
-                logger.warning(f"FLAC封面处理失败（不影响其他标签）: {str(e)}")
 
     except Exception as e:
         logger.error(f"FLAC基础标签处理失败: {str(e)}")
@@ -178,14 +169,12 @@ def _write_m4a_tags(file_path: Path, music_info: MusicInfo) -> None:
         if music_info.track_number > 0:
             audio['trkn'] = [(music_info.track_number, 0)]
 
-        # 下载并添加封面
+        # 下载并添加封面（统一走压缩，避免超大封面）
         if music_info.pic_url:
-            try:
-                pic_response = requests.get(music_info.pic_url, timeout=10)
-                pic_response.raise_for_status()
-                audio['covr'] = [pic_response.content]
-            except Exception:
-                pass  # 封面下载失败不影响主流程
+            cover = _fetch_cover(music_info.pic_url)
+            if cover:
+                fmt = MP4Cover.FORMAT_JPEG if _cover_mime(cover) == 'image/jpeg' else MP4Cover.FORMAT_PNG
+                audio['covr'] = [MP4Cover(cover, imageformat=fmt)]
 
         audio.save()
     except Exception as e:

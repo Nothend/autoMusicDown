@@ -321,19 +321,19 @@ class NeteaseMusic:
             else:
                 # 无效Cookie，默认非VIP
                 if result.get('code') != 200:
-                    print(f"Cookie无效：响应码非200（实际：{result.get('code')}）")
+                    self.logger.warning(f"Cookie无效：响应码非200（实际：{result.get('code')}）")
                 else:
-                    print(f"Cookie无效：profile为None（{result.get('profile')}）")
+                    self.logger.warning(f"Cookie无效：profile为None（{result.get('profile')}）")
                 return {'valid': False, 'is_vip': False}
-                
+
         except requests.RequestException as e:
-            print(f"Cookie验证请求失败: {e}")
+            self.logger.error(f"Cookie验证请求失败: {e}")
             return {'valid': False, 'is_vip': False}
         except json.JSONDecodeError as e:
-            print(f"解析验证响应失败: {e}")
+            self.logger.error(f"解析验证响应失败: {e}")
             return {'valid': False, 'is_vip': False}
         except Exception as e:
-            print(f"Cookie验证发生未知错误: {e}")
+            self.logger.error(f"Cookie验证发生未知错误: {e}")
             return {'valid': False, 'is_vip': False}
 
     def get_pic_url(self, pic_id: Optional[int], size: int = 300) -> str:

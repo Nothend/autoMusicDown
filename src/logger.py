@@ -2,7 +2,6 @@ import logging
 import os
 from datetime import datetime
 import sys
-from typing import Optional
 
 def setup_logger(level: int = logging.INFO) -> logging.Logger:
     """配置日志系统（确保控制台和文件输出正常）"""

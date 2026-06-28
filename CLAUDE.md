@@ -41,7 +41,7 @@ date when searching for the playlist. The VSCode launch config (`.vscode/launch.
 
 - `Config` (`src/config.py`) resolves the path as: `CONFIG_PATH` env → `<repo root>/config.yaml`
   → `<cwd>/config.yaml`. In Docker the file is mounted read-only at `/app/repo/config.yaml`.
-- `cookie`: raw NetEase cookie string (must contain `MUSIC_U`), parsed by `CookieManager`.
+- `cookie`: raw NetEase cookie string (must contain `MUSIC_U`), parsed by `utils.parse_cookie`.
 - `QUALITY_LEVEL`: one of `standard`/`exhigh`/`lossless`/`hires`/`sky`/`jyeffect`/`jymaster`.
 - `is_enabled("NAVIDROME")` and `is_enabled("MUSIC-TAG-WEB")` are the only feature toggles —
   they key off `NAVIDROME.USE_NAVIDROME` and `music-tag-web.USE_MYSQL`. Note the string
@@ -57,13 +57,17 @@ The pipeline:
    `{'valid', 'is_vip'}`. Non-VIP accounts abort the run (only VIP can fetch lossless URLs).
 2. **Find playlist** — `find_todays_playlist(uid, date)` lists the user's playlists and matches
    one whose name exactly equals the date string.
-3. **Filter** — for each track, dedupe against the library in one of three modes:
-   - Navidrome enabled → `NavidromeClient.navidrome_song_exists()` (Subsonic API).
-   - music-tag-web enabled → `MySQLChecker.check_song()` (queries its MySQL DB directly).
-   - neither → local-file check only.
-   Tracks not in the library then go through `SongDownloader.get_music_info()` and a local
-   dedupe via `is_song_already_downloaded()`. **MP3-format results are skipped on purpose**
-   (the library standardizes on lossless; see commit "MP3格式数据暂不下载").
+3. **Filter** — for each track, dedupe in this order (cheap checks first):
+   1. **Library check** — Navidrome enabled → `NavidromeChecker.exists()` (Subsonic API);
+      music-tag-web enabled → `MusicTagWebChecker.exists()` (queries its MySQL DB directly);
+      neither → skipped. Both live in `library.py` behind `LibraryChecker`.
+   2. **Local-file check** — `is_song_already_downloaded(name, artists)` globs the download
+      dir by name+artists (no network); skip if found. Runs *before* the heavy network calls
+      so already-downloaded tracks cost nothing on re-runs.
+   3. **Fetch download info** — `SongDownloader.get_music_info()` fetches the song URL first
+      and returns `None` immediately for MP3-only results, skipping the detail/album/lyric
+      calls. **MP3 is skipped on purpose** (library standardizes on lossless; see commit
+      "MP3格式数据暂不下载").
 4. **Download** — `SongDownloader.download_songs()` downloads to `/app/downloads` (hardcoded
    dir), then embeds tags via `_write_flac_tags` / `_write_m4a_tags` / `_write_mp3_tags`
    (mutagen). Cover art is fetched and downscaled by `_compress_image` (Pillow).
@@ -75,10 +79,11 @@ The pipeline:
   request signing; `NeteaseMusic` wraps playlist/song/lyric/album endpoints.
 - `downloader.py` — `SongDownloader` + `MusicInfo`/`DownloadResult` dataclasses; file download,
   filename sanitizing, tag writing, image compression.
-- `cookie_manager.py` — parses the raw cookie string into a dict (`parsed_cookies`) passed to
-  the API/downloader clients. (Note: `is_cookie_valid` here references undefined `self._...`
-  fields and is unused; the real validity check is `NeteaseMusic.is_cookie_valid`.)
-- `navidrome.py` / `mysql_check.py` — the two library-dedupe backends.
+- `utils.py` — shared pure helpers: `parse_cookie` (raw cookie string → dict),
+  `timestamp_to_date`, `quality_display_name`.
+- `library.py` — the whole library-dedupe subsystem behind the `LibraryChecker` interface:
+  `NavidromeChecker` (Subsonic API, token auth) + `MusicTagWebChecker` (music-tag-web MySQL),
+  plus the `make_library_checker` factory. `main` only depends on the interface.
 - `bark.py` — push notifications. `logger.py` — root logger to stdout + `logs/<date>.log`.
 
 ## Deployment

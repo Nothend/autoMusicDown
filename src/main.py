@@ -41,17 +41,15 @@ class MusicSyncApp:
         return self.library_checker.exists(title, artists, album)
 
     def _resolve_music_info(self, song_id: int, title: str):
-        """获取歌曲下载信息，统一处理获取失败 / MP3 跳过；返回 MusicInfo 或 None（表示跳过）"""
+        """获取歌曲下载信息；返回 MusicInfo，或 None 表示跳过。
+
+        get_music_info 内部已处理 MP3 短路（返回 None 并记录原因），这里只需
+        额外兜住网络/解析异常。
+        """
         try:
             music_info = self.downloader.get_music_info(song_id, self.quality_level)
         except Exception as e:
             self.logger.warning(f"无法获取歌曲《{title}》(ID {song_id}) 的下载信息，跳过：{e}")
-            return None
-        if music_info is None:
-            self.logger.warning(f"无法获取歌曲《{title}》(ID {song_id}) 的下载信息，跳过")
-            return None
-        if music_info.file_type == 'mp3':
-            self.logger.warning(f"歌曲《{title}》获取到 MP3 格式，跳过该歌曲")
             return None
         return music_info
 
@@ -125,16 +123,18 @@ class MusicSyncApp:
                         library_exists_count += 1
                         continue
 
-                    # 2) 获取下载信息（统一处理获取失败 / MP3 跳过）
+                    # 2) 再查本地是否已下载：仅凭歌名+艺术家，零网络请求，
+                    #    放在拉取下载信息之前，避免对已有歌曲白打 url/detail/album/lyric 四个接口
+                    if self.downloader.is_song_already_downloaded(title, artists):
+                        local_exists_count += 1
+                        continue
+
+                    # 3) 获取下载信息（内部已短路 MP3：先取 URL，命中 MP3 直接跳过后续请求）
                     music_info = self._resolve_music_info(song_id, title)
                     if music_info is None:
                         continue
 
-                    # 3) 库中没有，再看本地是否已下载
-                    if self.downloader.is_song_already_downloaded(music_info):
-                        local_exists_count += 1
-                    else:
-                        songs_to_download.append(music_info)
+                    songs_to_download.append(music_info)
 
                     # 轻微节流，避免一轮任务对接口造成突发请求
                     if self.request_delay > 0:

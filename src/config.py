@@ -5,6 +5,12 @@ import logging
 from typing import Dict, Any, Optional
 
 class Config:
+    # 功能开关表：对外名称 -> (YAML 节点名, 启用标志键)
+    _FEATURE_TOGGLES = {
+        'NAVIDROME': ('NAVIDROME', 'USE_NAVIDROME'),
+        'MUSIC-TAG-WEB': ('music-tag-web', 'USE_MYSQL'),
+    }
+
     def __init__(self, config_path: str | None = None):
         if config_path:
             self.config_path = Path(config_path)
@@ -40,34 +46,15 @@ class Config:
     
     def is_enabled(self, type: str) -> bool:
         """
-        检查指定类型的配置是否启用（支持参数大小写混用）
-        :param type: 配置类型，支持'NAVIDROME'或'MYSQL'（大小写不限）
-        :return: 配置是否有效启用，符合条件返回True，否则返回False
+        检查指定类型的功能是否启用（参数大小写不限）
+        :param type: 功能名，见 _FEATURE_TOGGLES（如 'NAVIDROME'、'MUSIC-TAG-WEB'）
+        :return: 对应节点存在且启用标志为 True 时返回 True，否则 False
         """
-        # 将参数转换为全大写，统一判断标准
-        type_upper = type.upper()
-        
-        # 处理NAVIDROME类型检查
-        if type_upper == 'NAVIDROME':
-            # 检查是否存在NAVIDROME节点（配置中是大写节点）
-            nav_node = self.config.get('NAVIDROME')
-            if not nav_node:
-                return False
-            # 检查USE_NAVIDROME是否存在且为True
-            return nav_node.get('USE_NAVIDROME', False) is True
-        
-        # 处理MYSQL类型检查（配置中是小写mysql节点）
-        elif type_upper == 'MUSIC-TAG-WEB':
-            # 检查是否存在mysql节点
-            mysql_node = self.config.get('music-tag-web')
-            if not mysql_node:
-                return False
-            # 检查USE_MYSQL是否存在且为True
-            return mysql_node.get('USE_MYSQL', False) is True
-        
-        # 其他类型返回False
-        else:
+        node_name, flag_key = self._FEATURE_TOGGLES.get(type.upper(), (None, None))
+        if not node_name:
             return False
+        node = self.config.get(node_name)
+        return bool(node) and node.get(flag_key, False) is True
     
     def get(self, key: str, default: Any = None) -> Any:
         """获取一级配置项（兼容原有逻辑）"""

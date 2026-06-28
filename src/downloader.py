@@ -2,7 +2,7 @@ import logging
 import os
 from pathlib import Path
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import requests
 
@@ -118,32 +118,49 @@ class SongDownloader:
             return '.m4a'
         
         return '.mp3'  # 默认
-    
-    def get_music_info(self, music_id: int, quality: str = "standard") -> MusicInfo:
+
+    def _target_stem(self, name: str, artists: List[str]) -> str:
+        """生成不含扩展名的目标文件名（艺术家用 & 拼接并清理非法字符）。"""
+        artists_joined = '&'.join(artists)
+        return self._sanitize_filename(f"{artists_joined} - {name}")
+
+    def _target_path(self, music_info: MusicInfo) -> Path:
+        """根据音乐信息生成完整目标文件路径（含扩展名）。"""
+        stem = self._target_stem(music_info.name, music_info.artists)
+        file_ext = self._determine_file_extension(music_info.download_url)
+        return self.download_dir / f"{stem}{file_ext}"
+
+    def get_music_info(self, music_id: int, quality: str = "standard") -> Optional[MusicInfo]:
         """获取音乐详细信息
-        
+
         Args:
             music_id: 音乐ID
             quality: 音质等级
-            
+
         Returns:
-            音乐信息对象
-            
+            音乐信息对象；若该歌曲只有 MP3 格式（库标准为无损，主动跳过）则返回 None
+
         Raises:
             DownloadException: 获取信息失败时抛出
         """
         try:
-            
+
             # 获取音乐URL信息
             url_result = self.NeteaseApi.get_song_url(music_id, quality, self.parsedCookies)
             if not url_result.get('data') or not url_result['data']:
                 raise DownloadException(f"无法获取音乐ID {music_id} 的播放链接")
-            
+
             song_data = url_result['data'][0]
             download_url = song_data.get('url', '')
             if not download_url:
                 raise DownloadException(f"音乐ID {music_id} 无可用的下载链接")
-            
+
+            # 先判定格式：MP3 直接短路返回，省去后续 detail/album/lyric 三次请求
+            file_type = song_data.get('type', 'mp3').lower()
+            if file_type == 'mp3':
+                self.logger.info(f"音乐ID {music_id} 获取到 MP3 格式，跳过该歌曲（省去后续请求）")
+                return None
+
             # 获取音乐详情
             detail_result = self.NeteaseApi.get_song_detail(music_id)
             if not detail_result.get('songs') or not detail_result['songs']:
@@ -182,7 +199,7 @@ class SongDownloader:
                 duration=song_detail.get('dt', 0) // 1000,  # 转换为秒
                 track_number=song_detail.get('no', 0),
                 download_url=download_url,
-                file_type=song_data.get('type', 'mp3').lower(),
+                file_type=file_type,
                 file_size=song_data.get('size', 0),
                 quality=quality,
                 lyric=lyric,
@@ -208,16 +225,12 @@ class SongDownloader:
                     error_message=f"无效的音质参数，支持: {', '.join(valid_qualities)}"
                 )
 
-            # 生成目标文件名（艺术家用 & 拼接）
-            artists_joined = '&'.join(music_info.artists)
-            base_filename = f"{artists_joined} - {music_info.name}"
-            safe_filename = self._sanitize_filename(base_filename)
-            file_ext = self._determine_file_extension(music_info.download_url)
-            file_path = self.download_dir / f"{safe_filename}{file_ext}"
+            # 生成目标文件路径（艺术家用 & 拼接）
+            file_path = self._target_path(music_info)
 
             # 已存在则跳过下载，否则执行核心下载逻辑
             if file_path.exists():
-                self.logger.info(f"文件已存在: {safe_filename}{file_ext}")
+                self.logger.info(f"文件已存在: {file_path.name}")
             else:
                 download_result = self.download_music_file(music_info, quality)
                 if not download_result.success:
@@ -227,7 +240,7 @@ class SongDownloader:
                         music_info=music_info
                     )
                 file_path = Path(download_result.file_path)
-                self.logger.info(f"下载完成: {safe_filename}{file_ext}")
+                self.logger.info(f"下载完成: {file_path.name}")
 
             if not file_path.exists():
                 return DownloadResult(
@@ -275,38 +288,29 @@ class SongDownloader:
         return success_songs
     
     
-    def is_song_already_downloaded(self, music_info:MusicInfo) -> bool:
+    def is_song_already_downloaded(self, name: str, artists: List[str]) -> bool:
         """
-        通过歌曲ID判断是否已下载
-        
+        仅凭歌名+艺术家判断本地是否已下载（零网络请求，可在拉取下载信息前先行筛除）。
+
+        不依赖下载链接，因此对所有已支持的扩展名都做一次存在性检查，
+        命中任意一种即视为已下载。
+
         Args:
-            song_id: 歌曲ID
-            quality: 音质等级
-            
+            name: 歌曲名
+            artists: 艺术家列表
+
         Returns:
             是否已下载
         """
         try:
-            # 生成可能的文件名
-            artists_joined = '&'.join(music_info.artists)  # 列表元素用 & 拼接为字符串
-            base_filename = f"{artists_joined} - {music_info.name}"
-            safe_filename = self._sanitize_filename(base_filename)
-
-            file_ext = self._determine_file_extension(music_info.download_url)
-            # 检查所有可能的文件
-            
-            file_path = self.download_dir / f"{safe_filename}{file_ext}"
-            # 目前哈希值判断有点问题，仅用文件名判断
-            if file_path.exists():
-                # 文件名匹配，进一步检查文件大小或哈希
-                #if self._verify_file_integrity(file_path, music_info):
-                #    self.logger.info(f"已找到匹配的歌曲文件: {file_path.name}")
-                #    return True
-                return True
-            return False
-            
+            stem = self._target_stem(name, artists)
+            # 仅用文件名判断（哈希校验暂未启用）
+            return any(
+                (self.download_dir / f"{stem}.{ext}").exists()
+                for ext in self.supported_formats
+            )
         except Exception as e:
-            self.logger.error(f"通过ID检查歌曲是否已下载时出错: {str(e)}")
+            self.logger.error(f"检查歌曲是否已下载时出错: {str(e)}")
             return False
     
     
@@ -322,15 +326,9 @@ class SongDownloader:
             下载结果对象
         """
         try:
-            # 生成可能的文件名
-            artists_joined = '&'.join(music_info.artists)  # 列表元素用 & 拼接为字符串
-            base_filename = f"{artists_joined} - {music_info.name}"
-            safe_filename = self._sanitize_filename(base_filename)
-            
-            # 确定文件扩展名
-            file_ext = self._determine_file_extension(music_info.download_url)
-            file_path = self.download_dir / f"{safe_filename}{file_ext}"
-            
+            # 生成目标文件路径
+            file_path = self._target_path(music_info)
+
             # 检查文件是否已存在
             if file_path.exists():
                 return DownloadResult(
