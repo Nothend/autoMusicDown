@@ -60,13 +60,13 @@ def write_tags(file_path: Path, music_info: MusicInfo) -> None:
 
 
 def _write_mp3_tags(file_path: Path, music_info: MusicInfo) -> None:
-    """写入MP3标签（图片>5MB自动压缩，失败不影响其他标签）"""
+    """写入MP3标签（基础标签 + 封面一次性写盘；封面>5MB自动压缩，失败不影响其他标签）"""
     try:
         audio = MP3(str(file_path), ID3=ID3)
         if not audio.tags:
             audio.add_tags()
 
-        # ---------------------- 1. 保存基础标签 ----------------------
+        # ---------------------- 基础标签 ----------------------
         audio.tags.setall('TIT2', [TIT2(encoding=3, text=music_info.name)])
         audio.tags.setall('TPE1', [TPE1(encoding=3, text=music_info.artists)])
         audio.tags.setall('TALB', [TALB(encoding=3, text=music_info.album)])
@@ -75,7 +75,7 @@ def _write_mp3_tags(file_path: Path, music_info: MusicInfo) -> None:
             audio.tags.setall('TRCK', [TRCK(encoding=3, text=str(music_info.track_number))])
 
         # 发行时间
-        if hasattr(music_info, 'publishTime') and music_info.publishTime:
+        if music_info.publishTime:
             full_date = music_info.publishTime.strip()
             try:
                 year = full_date.split('-')[0] if '-' in full_date else full_date
@@ -94,29 +94,27 @@ def _write_mp3_tags(file_path: Path, music_info: MusicInfo) -> None:
                 encoding=3, lang='XXX', desc='Translated Lyrics', text=music_info.tlyric.strip()
             )])
 
-        audio.save()
-        logger.debug(f"已保存MP3基础标签: {file_path.name}")
-
-        # ---------------------- 2. 处理封面（>5MB 自动压缩） ----------------------
+        # ---------------------- 封面（>5MB 自动压缩） ----------------------
         if music_info.pic_url:
             cover = _fetch_cover(music_info.pic_url)
             if cover:
                 audio.tags.setall('APIC', [APIC(
                     encoding=3, mime=_cover_mime(cover), type=3, desc='Cover', data=cover
                 )])
-                audio.save()
-                logger.debug("已添加MP3封面并保存")
+
+        audio.save()  # 基础标签 + 封面一次性落盘
+        logger.debug(f"已保存MP3标签: {file_path.name}")
 
     except Exception as e:
-        logger.error(f"MP3基础标签处理失败: {str(e)}")
+        logger.error(f"MP3标签处理失败: {str(e)}")
 
 
 def _write_flac_tags(file_path: Path, music_info: MusicInfo) -> None:
-    """写入FLAC标签（图片>5MB自动压缩，失败不影响其他标签）"""
+    """写入FLAC标签（基础标签 + 封面一次性写盘；封面>5MB自动压缩，失败不影响其他标签）"""
     try:
         audio = FLAC(str(file_path))
 
-        # ---------------------- 1. 保存基础标签 ----------------------
+        # ---------------------- 基础标签 ----------------------
         audio['TITLE'] = music_info.name
         audio['ARTIST'] = music_info.artists
         audio['ALBUM'] = music_info.album
@@ -124,7 +122,7 @@ def _write_flac_tags(file_path: Path, music_info: MusicInfo) -> None:
             audio['TRACKNUMBER'] = str(music_info.track_number)
 
         # 发行时间
-        if hasattr(music_info, 'publishTime') and music_info.publishTime:
+        if music_info.publishTime:
             full_date = music_info.publishTime
             audio['YEAR'] = full_date.split('-')[0] if '-' in full_date else full_date
             audio['DATE'] = full_date
@@ -137,10 +135,7 @@ def _write_flac_tags(file_path: Path, music_info: MusicInfo) -> None:
         if music_info.tlyric:
             audio['TRANSLATEDLYRICS'] = music_info.tlyric.strip()
 
-        audio.save()
-        logger.debug(f"已保存FLAC基础标签: {file_path.name}")
-
-        # ---------------------- 2. 处理封面（>5MB 自动压缩） ----------------------
+        # ---------------------- 封面（>5MB 自动压缩） ----------------------
         if music_info.pic_url:
             cover = _fetch_cover(music_info.pic_url)
             if cover:
@@ -150,11 +145,12 @@ def _write_flac_tags(file_path: Path, music_info: MusicInfo) -> None:
                 picture.desc = 'Cover'
                 picture.data = cover
                 audio.add_picture(picture)
-                audio.save()
-                logger.debug("已添加FLAC封面并保存")
+
+        audio.save()  # 基础标签 + 封面一次性落盘
+        logger.debug(f"已保存FLAC标签: {file_path.name}")
 
     except Exception as e:
-        logger.error(f"FLAC基础标签处理失败: {str(e)}")
+        logger.error(f"FLAC标签处理失败: {str(e)}")
 
 
 def _write_m4a_tags(file_path: Path, music_info: MusicInfo) -> None:

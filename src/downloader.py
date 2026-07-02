@@ -162,20 +162,23 @@ class SongDownloader:
                 return None
 
             # 获取音乐详情
-            detail_result = self.NeteaseApi.get_song_detail(music_id)
+            detail_result = self.NeteaseApi.get_song_detail(music_id, self.parsedCookies)
             if not detail_result.get('songs') or not detail_result['songs']:
                 raise DownloadException(f"无法获取音乐ID {music_id} 的详细信息")
-            
+
             song_detail = detail_result['songs'][0]
 
-            # 获取专辑详情以提取更准确的发行时间
-            alum_id=song_detail['al']['id'] if song_detail and 'al' in song_detail and song_detail['al'] else None
-            alum_info = self.NeteaseApi.get_album_detail(alum_id,self.parsedCookies) if alum_id else None
-            alum_publisTime=''
-            if alum_info and 'publishTime' in alum_info:
-                alum_publisTime = alum_info.get('publishTime', song_detail['al'].get('publishTime',0))
-            
-            
+            # 发行时间：优先用歌曲详情自带的 publishTime（歌曲级或其 al 专辑级），
+            # 仅当两者都缺失时才回退到专辑接口——省去每首歌一次网络请求。
+            album = song_detail.get('al') or {}
+            publish_ts = song_detail.get('publishTime') or album.get('publishTime') or 0
+            if not publish_ts and album.get('id'):
+                try:
+                    album_info = self.NeteaseApi.get_album_detail(album['id'], self.parsedCookies)
+                    publish_ts = album_info.get('publishTime') or 0
+                except APIException as e:
+                    self.logger.debug(f"专辑详情获取失败，跳过发行时间回退：{e}")
+
             # 获取歌词
             lyric_result = self.NeteaseApi.get_lyric(music_id, self.parsedCookies)
             lyric = lyric_result.get('lrc', {}).get('lyric', '') if lyric_result else ''
@@ -183,11 +186,8 @@ class SongDownloader:
             
             # 构建艺术家字符串
             artists = [artist['name'] for artist in song_detail.get('ar', [])]  # 生成列表
-            # 提取发行时间（处理13位/11位时间戳）
-            # 网易云API的album.publishTime为13位毫秒级时间戳
-            publish_timestamp = alum_publisTime
-            # 转换为年月日格式（调用工具函数）
-            publish_time = timestamp_to_date(publish_timestamp)
+            # 转换发行时间为 YYYY-MM-DD（工具函数已兼容 10/13 位时间戳与空值）
+            publish_time = timestamp_to_date(publish_ts)
             # 创建MusicInfo对象
             music_info = MusicInfo(
                 id=music_id,
@@ -215,16 +215,8 @@ class SongDownloader:
   
     
     def download_song(self, music_info: MusicInfo, quality: str = "standard") -> DownloadResult:
-        """下载单首歌曲，返回 DownloadResult"""
+        """下载单首歌曲，返回 DownloadResult（音质合法性已在应用启动时统一校验）"""
         try:
-            # 验证音质参数
-            valid_qualities = ['standard', 'exhigh', 'lossless', 'hires', 'sky', 'jyeffect', 'jymaster']
-            if quality not in valid_qualities:
-                return DownloadResult(
-                    success=False,
-                    error_message=f"无效的音质参数，支持: {', '.join(valid_qualities)}"
-                )
-
             # 生成目标文件路径（艺术家用 & 拼接）
             file_path = self._target_path(music_info)
 
@@ -316,57 +308,53 @@ class SongDownloader:
     
     
     def download_music_file(self, music_info: MusicInfo, quality: str = "standard") -> DownloadResult:
-        """下载音乐文件到本地
-        
-        Args:
-            music_id: 音乐ID
-            quality: 音质等级
-            
-        Returns:
-            下载结果对象
-        """
-        try:
-            # 生成目标文件路径
-            file_path = self._target_path(music_info)
+        """下载音乐文件到本地（原子写入 + 完整性校验）。
 
-            # 检查文件是否已存在
-            if file_path.exists():
-                return DownloadResult(
-                    success=True,
-                    file_path=str(file_path),
-                    file_size=file_path.stat().st_size,
-                    music_info=music_info
-                )
-            
-            # 下载文件
+        先落临时 .part 文件，按接口给出的大小校验完整后，再原子改名为最终文件。
+        这样下载中途失败/进程被杀只会残留 .part，绝不会污染最终文件名，从而避免
+        "截断文件被后续运行当成已下载而永久跳过"的问题。调用方已确认目标文件不存在。
+        """
+        file_path = self._target_path(music_info)
+        tmp_path = file_path.with_name(file_path.name + '.part')
+        try:
             response = requests.get(music_info.download_url, stream=True, timeout=30)
             response.raise_for_status()
-            
-            # 写入文件
-            with open(file_path, 'wb') as f:
+
+            downloaded = 0
+            with open(tmp_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
-            
-            # 写入音乐标签
+                        downloaded += len(chunk)
+
+            # 完整性校验：与接口给出的原始音频大小比对（大小已知时），不符视为失败并重试下轮
+            expected = music_info.file_size or 0
+            if expected > 0 and downloaded != expected:
+                raise DownloadException(
+                    f"下载不完整：期望 {expected} 字节，实际 {downloaded} 字节"
+                )
+
+            # 原子改名到最终路径，再写标签（须在大小校验之后；标签写失败也只是缺元信息，文件仍完整可用）
+            os.replace(tmp_path, file_path)
             write_tags(file_path, music_info)
-            
+
             return DownloadResult(
                 success=True,
                 file_path=str(file_path),
                 file_size=file_path.stat().st_size,
                 music_info=music_info
             )
-            
-        except DownloadException:
-            raise
+
         except requests.RequestException as e:
-            return DownloadResult(
-                success=False,
-                error_message=f"下载请求失败: {e}"
-            )
+            return DownloadResult(success=False, error_message=f"下载请求失败: {e}")
+        except DownloadException as e:
+            return DownloadResult(success=False, error_message=str(e))
         except Exception as e:
-            return DownloadResult(
-                success=False,
-                error_message=f"下载过程中发生错误: {e}"
-            )
+            return DownloadResult(success=False, error_message=f"下载过程中发生错误: {e}")
+        finally:
+            # 清理可能残留的临时文件（成功路径已 os.replace 掉；不存在则忽略）
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 
 class AudioFormat(Enum):
@@ -51,4 +51,3 @@ class DownloadResult:
     file_size: int = 0
     error_message: str = ""
     music_info: Optional[MusicInfo] = None
-    data: Optional[Dict] = None

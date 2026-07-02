@@ -31,7 +31,7 @@
 1. 准备环境：群晖或其他支持Docker的主机
 2. 修改`docker-compose.yml`：
    - `CRON_SCHEDULE`：设置每日执行时间（cron格式，默认`0 20-23,0 * * *`）
-   - `PULL_CRON`：可选，设置代码拉取时间（默认每天18点）
+   - `RUN_ON_START`：可选，设为`true`则容器启动即先同步一次（默认`false`）
    - 目录映射：`./downloads`可直接映射到music-tag-web的下载目录，方便管理
 3. 启动容器：
    ```bash

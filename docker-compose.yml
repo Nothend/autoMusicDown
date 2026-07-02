@@ -1,16 +1,13 @@
-version: '3.8'
-
 services:
   autoMusicDown:
     image: leonautilus/auto-music-downloader:latest
     container_name: auto-music-downloader
     restart: always
     volumes:
-      - ./config.yaml:/app/repo/config.yaml:ro    # 配置文件映射（只读）
-      - ./logs:/app/logs  # 日志目录映射
-      - ./downloads:/app/downloads  # 下载目录映射（主机目录可自定义）
+      - ./config.yaml:/app/config.yaml:ro    # 配置文件映射（只读）
+      - ./logs:/app/logs                     # 日志目录映射
+      - ./downloads:/app/downloads           # 下载目录映射（主机目录可自定义）
     environment:
-      - TZ=Asia/Shanghai  # 设置时区
-      - REPO_URL=https://github.com/Nothend/autoMusicDown.git  # 公共仓库地址
-      - CRON_SCHEDULE=0 20-23,0 * * *    # 执行main.py：每天20-23点及0点，每小时一次
-      - PULL_CRON=0 18 * * *           # 可选：自定义拉取时间（默认已设为每天18点，可省略）
+      - TZ=Asia/Shanghai                     # 时区（日期命名的歌单匹配依赖本地时区）
+      - CRON_SCHEDULE=0 20-23,0 * * *        # 执行 main.py：每天 20-23 点及 0 点，每小时一次
+      # - RUN_ON_START=true                  # 可选：容器启动即先同步一次（默认 false）

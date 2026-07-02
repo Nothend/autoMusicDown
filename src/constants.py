@@ -21,17 +21,12 @@ class APIConstants:
     #// 个人歌单
     PERSONAL_PLAYLIST_API = 'https://music.163.com/api/user/playlist'
 
-    # 默认配置
+    # 默认设备参数：既作为 eapi header 里的默认 config，也作为请求默认 cookies（两者内容一致）。
+    # 调用方一律 .copy() 后再改，共享同一份引用是安全的。
     DEFAULT_CONFIG = {
         "os": "pc",
         "appver": "",
         "osver": "",
         "deviceId": "pyncm!"
     }
-
-    DEFAULT_COOKIES = {
-        "os": "pc",
-        "appver": "",
-        "osver": "",
-        "deviceId": "pyncm!"
-    }
+    DEFAULT_COOKIES = DEFAULT_CONFIG

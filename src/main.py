@@ -1,6 +1,7 @@
 from datetime import datetime
 import logging
 import os
+import sys
 import time
 from typing import List
 
@@ -10,6 +11,7 @@ from downloader import SongDownloader
 from bark import BarkNotifier
 from logger import setup_logger
 from library import make_library_checker
+from models import QualityLevel
 from utils import parse_cookie, quality_display_name
 
 
@@ -25,6 +27,12 @@ class MusicSyncApp:
         self.bark = BarkNotifier(config.get("BARK_API", ""))
 
         self.quality_level = config.get("QUALITY_LEVEL", "lossless")
+        # 音质合法性在启动时统一校验一次（配置对整轮任务恒定，无需每首歌重复校验）
+        valid_qualities = {q.value for q in QualityLevel}
+        if self.quality_level not in valid_qualities:
+            raise ValueError(
+                f"无效的音质等级 '{self.quality_level}'，支持: {', '.join(sorted(valid_qualities))}"
+            )
         # 每首歌处理之间的间隔（秒），默认 0.5s，可在 config.yaml 用 REQUEST_DELAY 调整
         self.request_delay = float(config.get("REQUEST_DELAY", 0.5))
         # 库检查后端在 run_task 里按需创建（避免 cookie 无效时白开数据库连接）
@@ -213,15 +221,15 @@ def main():
         # 关闭日志系统，确保所有日志都已写入
         logging.shutdown()
         # 显式退出，返回成功状态码
-        exit(0)
-        
+        sys.exit(0)
+
     except Exception as e:
         print(f"程序启动失败: {str(e)}")
         logging.error(f"程序启动失败: {str(e)}", exc_info=True)
         # 异常情况下也确保日志关闭
         logging.shutdown()
         # 返回错误状态码
-        exit(1)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

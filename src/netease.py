@@ -1,4 +1,6 @@
 
+import base64
+import hashlib
 import logging
 import json
 from random import randrange
@@ -45,64 +47,52 @@ class NeteaseMusic:
         Raises:
             APIException: API调用失败或响应解析错误时抛出
         """
+        headers = {
+            'User-Agent': APIConstants.USER_AGENT,
+            'Referer': APIConstants.REFERER,
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+
+        # 分页拉取：用户会日积月累地新建"以日期命名"的歌单，单页 20 条会漏掉排在后面的
+        # 今日歌单，这里翻页取全（每页 100 条，最多 2000 条兜底，避免异常情况下无限翻页）。
+        PAGE_SIZE = 100
+        MAX_PLAYLISTS = 2000
         try:
-            # 构建请求参数
-            data = {
-                'uid': uid,
-                'offset': 0,
-                'limit': 20
-            }
-            
-            # 构建请求头
-            headers = {
-                'User-Agent': APIConstants.USER_AGENT,
-                'Referer': APIConstants.REFERER,
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
-            
-            # 发送POST请求
-            response = SESSION.post(
-                url=APIConstants.PERSONAL_PLAYLIST_API,
-                data=data,
-                headers=headers,
-                cookies=cookies,
-                timeout=30
-            )
-            response.raise_for_status()  # 抛出HTTP错误状态码
-            
-            # 解析响应JSON
-            result = response.json()
-            
-            # 检查API返回状态
-            if result.get('code') != 200:
-                raise APIException(f"获取用户歌单失败: {result.get('message', '未知错误')}")
-            
-            # 提取歌单列表（确保为列表类型）
-            playlists: List[Dict[str, Any]] = result.get('playlist', [])
-            processed_playlists = []
-            
-            # 遍历处理每个歌单
-            for playlist in playlists:
-                # 转换时间戳（使用类内时间转换方法）
-                update_time = timestamp_to_date(playlist.get('updateTime', ''))
-                track_update_time = timestamp_to_date(playlist.get('trackUpdateTime', ''))
-                
-                # 封装处理后的歌单信息
-                processed_playlist = {
-                    'id': playlist.get('id'),
-                    'name': playlist.get('name'),
-                    'track_count': playlist.get('trackCount'),
-                    'update_time': update_time,
-                    'track_update_time': track_update_time
-                }
-                processed_playlists.append(processed_playlist)
-            
-            # 构建返回结果
+            processed_playlists: List[Dict[str, Any]] = []
+            offset = 0
+            while offset < MAX_PLAYLISTS:
+                data = {'uid': uid, 'offset': offset, 'limit': PAGE_SIZE}
+                response = SESSION.post(
+                    url=APIConstants.PERSONAL_PLAYLIST_API,
+                    data=data, headers=headers, cookies=cookies, timeout=30,
+                )
+                response.raise_for_status()  # 抛出HTTP错误状态码
+
+                result = response.json()
+                if result.get('code') != 200:
+                    raise APIException(f"获取用户歌单失败: {result.get('message', '未知错误')}")
+
+                playlists: List[Dict[str, Any]] = result.get('playlist', []) or []
+                for playlist in playlists:
+                    # 转换时间戳（使用工具函数）并封装处理后的歌单信息
+                    processed_playlists.append({
+                        'id': playlist.get('id'),
+                        'name': playlist.get('name'),
+                        'track_count': playlist.get('trackCount'),
+                        'update_time': timestamp_to_date(playlist.get('updateTime', '')),
+                        'track_update_time': timestamp_to_date(playlist.get('trackUpdateTime', '')),
+                    })
+
+                # 网易云用 more 标记是否还有下一页；再以"本页不足一页"兜底终止
+                if not result.get('more') or len(playlists) < PAGE_SIZE:
+                    break
+                offset += PAGE_SIZE
+
             return {
                 'total': len(processed_playlists),
                 'playlists': processed_playlists
             }
-            
+
         except requests.RequestException as e:
             raise APIException(f"获取用户歌单请求失败: {str(e)}")
         except (json.JSONDecodeError, KeyError) as e:
@@ -265,9 +255,6 @@ class NeteaseMusic:
         Returns:
             加密后的字符串
         """
-        import base64
-        import hashlib
-        
         magic = list('3go8&$8*3*3h0k(2)2')
         song_id = list(id_str)
         
@@ -392,21 +379,27 @@ class NeteaseMusic:
         except (json.JSONDecodeError, KeyError) as e:
             raise APIException(f"解析响应数据失败: {e}")
     
-    def get_song_detail(self, song_id: int) -> Dict[str, Any]:
+    def get_song_detail(self, song_id: int, cookies: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """获取歌曲详细信息
-        
+
         Args:
             song_id: 歌曲ID
-            
+            cookies: 用户cookies（缺省时用实例自身的 cookies，与其他接口保持一致）
+
         Returns:
             包含歌曲详细信息的字典
-            
+
         Raises:
             APIException: API调用失败时抛出
         """
         try:
             data = {'c': json.dumps([{"id": song_id, "v": 0}])}
-            response = SESSION.post(APIConstants.SONG_DETAIL_V3, data=data, timeout=30)
+            headers = {
+                'User-Agent': APIConstants.USER_AGENT,
+                'Referer': APIConstants.REFERER
+            }
+            response = SESSION.post(APIConstants.SONG_DETAIL_V3, data=data,
+                                    headers=headers, cookies=cookies or self.cookies, timeout=30)
             response.raise_for_status()
             
             result = response.json()
