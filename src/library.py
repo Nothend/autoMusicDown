@@ -198,9 +198,18 @@ class MusicTagWebChecker(LibraryChecker):
 
     def exists(self, title: str, artists: List[str], album: str = "") -> bool:
         """库中存在该歌曲的非 MP3 记录返回 True；不存在/仅有 MP3 返回 False。"""
-        if not self.connection or not self.connection.open:
-            self.logger.error("无活跃数据库连接")
-            raise ConnectionError("数据库连接未打开或已关闭")
+        if self.connection is None:
+            self.logger.error("数据库连接未初始化")
+            raise ConnectionError("数据库连接未初始化")
+        # 长任务（30 首 + 逐首节流）可能触发 MySQL wait_timeout 把连接断开；
+        # ping(reconnect=True) 在断开时自动重连，避免一次断连后剩余歌曲全部跳过库检查。
+        # 实在连不上则本次降级为"不在库中"（与下方查询失败返回 False 的策略一致），
+        # 只会导致该歌被重下，不至于中断整轮同步。
+        try:
+            self.connection.ping(reconnect=True)
+        except pymysql.MySQLError as e:
+            self.logger.error(f"MySQL 连接不可用，跳过本次库检查: {e}")
+            return False
         if not title or not artists:
             self.logger.warning("歌曲名或艺术家列表为空，无法检查")
             return False

@@ -1,6 +1,6 @@
 """HTTP 层：全局共享 Session（带重试/退避）+ 简单的 eapi POST 封装。"""
 
-from typing import Dict
+from typing import Dict, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -34,6 +34,20 @@ class APIException(Exception):
     pass
 
 
+def netease_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """网易云各接口通用请求头（UA/Referer）；extra 可追加/覆盖额外字段。
+
+    统一在此定义，供 http_client 自身与 netease 各接口复用，避免多处重复维护同一份头。
+    """
+    headers = {
+        'User-Agent': APIConstants.USER_AGENT,
+        'Referer': APIConstants.REFERER,
+    }
+    if extra:
+        headers.update(extra)
+    return headers
+
+
 class HTTPClient:
     """HTTP客户端类"""
 
@@ -45,10 +59,7 @@ class HTTPClient:
     @staticmethod
     def post_request_full(url: str, params: str, cookies: Dict[str, str]) -> requests.Response:
         """发送POST请求并返回完整响应对象"""
-        headers = {
-            'User-Agent': APIConstants.USER_AGENT,
-            'Referer': APIConstants.REFERER,
-        }
+        headers = netease_headers()
 
         request_cookies = APIConstants.DEFAULT_COOKIES.copy()
         request_cookies.update(cookies)

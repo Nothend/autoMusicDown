@@ -1,6 +1,7 @@
 """通用工具函数：被多个模块共享的纯函数（无外部依赖、无状态）。"""
 
 import logging
+import re
 from datetime import datetime
 from typing import Dict, Union
 
@@ -50,23 +51,19 @@ def timestamp_to_date(timestamp: Union[int, str, None]) -> str:
 
 
 def quality_display_name(quality: str) -> str:
-    """音质等级 -> 简短中文名，未知则原样返回。"""
+    """音质等级 -> 简短中文名，未知等级返回"未知品质"。"""
     return QUALITY_DISPLAY_NAMES.get(quality, "未知品质")
 
 
 def parse_cookie(cookie_str: str) -> Dict[str, str]:
-    """把 cookie 字符串解析成 dict（支持分号或换行分隔，按第一个 = 切分）。"""
+    """把 cookie 字符串解析成 dict（分号/换行任意混用作分隔，按第一个 = 切分）。"""
     if not cookie_str or not cookie_str.strip():
         logger.warning("Cookie 字符串为空，返回空字典")
         return {}
 
-    cookie_str = cookie_str.strip()
-    if ';' in cookie_str:
-        pairs = cookie_str.split(';')
-    elif '\n' in cookie_str:
-        pairs = cookie_str.split('\n')
-    else:
-        pairs = [cookie_str]
+    # 同时按分号与换行切分：粘贴来的 cookie 可能两种分隔符混用，
+    # 只按其一切会把另一种分隔符残留进值里
+    pairs = re.split(r'[;\n]+', cookie_str.strip())
 
     cookies: Dict[str, str] = {}
     for pair in pairs:

@@ -202,8 +202,12 @@ def main():
         config = Config()
         # 初始化日志
         level = config.get("LEVEL", "INFO")
-        # 用 getattr 替代 logging.getLevelName，获取日志级别常量
-        log_level = getattr(logging, level, logging.INFO)  # 若级别无效，默认使用 INFO
+        # 用 getattr 替代 logging.getLevelName，获取日志级别常量。
+        # 必须 .upper()：小写如 "debug" 会取到 logging.debug 这个函数而非级别常量 10，
+        # 且过滤掉取到非 int 的意外情况，一律回退 INFO。
+        log_level = getattr(logging, str(level).upper(), logging.INFO)
+        if not isinstance(log_level, int):
+            log_level = logging.INFO
         setup_logger(log_level)
         
         logger = logging.getLogger(__name__)

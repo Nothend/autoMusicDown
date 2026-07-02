@@ -12,10 +12,11 @@ class Config:
     }
 
     def __init__(self, config_path: str | None = None):
+        env_path = os.getenv("CONFIG_PATH")
         if config_path:
             self.config_path = Path(config_path)
-        elif os.getenv("CONFIG_PATH"):
-            self.config_path = Path(os.getenv("CONFIG_PATH"))
+        elif env_path:
+            self.config_path = Path(env_path)
         else:
             # __file__ 在 src/config.py，这里取上一级作为项目根
             self.config_path = Path(__file__).resolve().parent.parent / "config.yaml"
@@ -44,17 +45,19 @@ class Config:
             logging.error(f"配置文件加载失败: {str(e)}")
             raise
     
-    def is_enabled(self, type: str) -> bool:
+    def is_enabled(self, name: str) -> bool:
         """
         检查指定类型的功能是否启用（参数大小写不限）
-        :param type: 功能名，见 _FEATURE_TOGGLES（如 'NAVIDROME'、'MUSIC-TAG-WEB'）
+        :param name: 功能名，见 _FEATURE_TOGGLES（如 'NAVIDROME'、'MUSIC-TAG-WEB'）
         :return: 对应节点存在且启用标志为 True 时返回 True，否则 False
         """
-        node_name, flag_key = self._FEATURE_TOGGLES.get(type.upper(), (None, None))
+        node_name, flag_key = self._FEATURE_TOGGLES.get(name.upper(), (None, None))
         if not node_name:
             return False
         node = self.config.get(node_name)
-        return bool(node) and node.get(flag_key, False) is True
+        # 用 isinstance 兜住配置写错的情况（如把 NAVIDROME 写成布尔量而非映射），
+        # 否则对非 dict 调用 .get 会抛 AttributeError 并中断整轮同步
+        return isinstance(node, dict) and node.get(flag_key) is True
     
     def get(self, key: str, default: Any = None) -> Any:
         """获取一级配置项（兼容原有逻辑）"""

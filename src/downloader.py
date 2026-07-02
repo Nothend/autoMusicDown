@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 import requests
 
 from netease import NeteaseMusic, APIException
+from http_client import SESSION
 from utils import timestamp_to_date
 from models import AudioFormat, MusicInfo, DownloadResult
 from tagger import write_tags
@@ -90,45 +91,20 @@ class SongDownloader:
         
         return filename or "unknown"
 
-    def _determine_file_extension(self, url: str, content_type: str = "") -> str:
-        """根据URL和Content-Type确定文件扩展名
-        
-        Args:
-            url: 下载URL
-            content_type: HTTP Content-Type头
-            
-        Returns:
-            文件扩展名
-        """
-        # 首先尝试从URL获取
-        if '.flac' in url.lower():
-            return '.flac'
-        elif '.mp3' in url.lower():
-            return '.mp3'
-        elif '.m4a' in url.lower():
-            return '.m4a'
-        
-        # 从Content-Type获取
-        content_type = content_type.lower()
-        if 'flac' in content_type:
-            return '.flac'
-        elif 'mpeg' in content_type or 'mp3' in content_type:
-            return '.mp3'
-        elif 'mp4' in content_type or 'm4a' in content_type:
-            return '.m4a'
-        
-        return '.mp3'  # 默认
-
     def _target_stem(self, name: str, artists: List[str]) -> str:
         """生成不含扩展名的目标文件名（艺术家用 & 拼接并清理非法字符）。"""
         artists_joined = '&'.join(artists)
         return self._sanitize_filename(f"{artists_joined} - {name}")
 
     def _target_path(self, music_info: MusicInfo) -> Path:
-        """根据音乐信息生成完整目标文件路径（含扩展名）。"""
+        """根据音乐信息生成完整目标文件路径（含扩展名）。
+
+        扩展名直接取接口返回的 file_type（url 接口的 type 字段，权威值），
+        不再靠在下载 URL 里猜子串——URL 带 query 参数时子串匹配可能误判，
+        会把 FLAC 存成 .mp3 导致后续按 MP3 写标签出错。
+        """
         stem = self._target_stem(music_info.name, music_info.artists)
-        file_ext = self._determine_file_extension(music_info.download_url)
-        return self.download_dir / f"{stem}{file_ext}"
+        return self.download_dir / f"{stem}.{music_info.file_type}"
 
     def get_music_info(self, music_id: int, quality: str = "standard") -> Optional[MusicInfo]:
         """获取音乐详细信息
@@ -159,6 +135,11 @@ class SongDownloader:
             file_type = song_data.get('type', 'mp3').lower()
             if file_type == 'mp3':
                 self.logger.info(f"音乐ID {music_id} 获取到 MP3 格式，跳过该歌曲（省去后续请求）")
+                return None
+            # 只处理 tagger 能写标签的白名单格式（flac/m4a）；其它未知格式一并跳过，
+            # 避免下载回来因无对应写标签器而报错，也顺带省去后续三次请求。
+            if file_type not in self.supported_formats:
+                self.logger.warning(f"音乐ID {music_id} 为不支持的格式 {file_type}，跳过该歌曲")
                 return None
 
             # 获取音乐详情
@@ -224,7 +205,7 @@ class SongDownloader:
             if file_path.exists():
                 self.logger.info(f"文件已存在: {file_path.name}")
             else:
-                download_result = self.download_music_file(music_info, quality)
+                download_result = self.download_music_file(music_info, file_path)
                 if not download_result.success:
                     return DownloadResult(
                         success=False,
@@ -307,17 +288,22 @@ class SongDownloader:
     
     
     
-    def download_music_file(self, music_info: MusicInfo, quality: str = "standard") -> DownloadResult:
+    def download_music_file(self, music_info: MusicInfo, file_path: Optional[Path] = None) -> DownloadResult:
         """下载音乐文件到本地（原子写入 + 完整性校验）。
 
         先落临时 .part 文件，按接口给出的大小校验完整后，再原子改名为最终文件。
         这样下载中途失败/进程被杀只会残留 .part，绝不会污染最终文件名，从而避免
         "截断文件被后续运行当成已下载而永久跳过"的问题。调用方已确认目标文件不存在。
+
+        file_path 由调用方算好传入以避免重复计算；未传入时自行推导。
         """
-        file_path = self._target_path(music_info)
+        if file_path is None:
+            file_path = self._target_path(music_info)
         tmp_path = file_path.with_name(file_path.name + '.part')
         try:
-            response = requests.get(music_info.download_url, stream=True, timeout=30)
+            # 复用带重试/退避的共享 Session：下载大文件更易遇到瞬时 5xx/连接中断，
+            # 裸 requests.get 一失败整首歌就要丢到下轮，走 SESSION 可自动重试并复用连接。
+            response = SESSION.get(music_info.download_url, stream=True, timeout=30)
             response.raise_for_status()
 
             downloaded = 0

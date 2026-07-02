@@ -10,7 +10,7 @@ import requests
 
 from constants import APIConstants
 from crypto import CryptoUtils
-from http_client import SESSION, HTTPClient, APIException
+from http_client import SESSION, HTTPClient, APIException, netease_headers
 from utils import timestamp_to_date
 
 
@@ -20,13 +20,18 @@ class NeteaseMusic:
         self.crypto_utils = CryptoUtils()
         self.cookies = cookies
         self.logger = logging.getLogger(__name__)
-        
-    def get_user_playlist(self, uid: int, cookies: Dict[str, str]) -> Dict[str, Any]:
+
+    @staticmethod
+    def _default_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """各接口通用请求头，统一委托给 http_client.netease_headers（单一来源）。"""
+        return netease_headers(extra)
+
+    def get_user_playlist(self, uid: int, cookies: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """获取用户的歌单列表详情
-        
+
         Args:
             uid: 用户ID
-            cookies: 用户登录态cookies
+            cookies: 用户登录态cookies（缺省时用实例自身的 cookies）
             
         Returns:
             包含处理后的歌单列表的字典，结构如下：
@@ -47,11 +52,8 @@ class NeteaseMusic:
         Raises:
             APIException: API调用失败或响应解析错误时抛出
         """
-        headers = {
-            'User-Agent': APIConstants.USER_AGENT,
-            'Referer': APIConstants.REFERER,
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        cookies = cookies or self.cookies
+        headers = self._default_headers({'Content-Type': 'application/x-www-form-urlencoded'})
 
         # 分页拉取：用户会日积月累地新建"以日期命名"的歌单，单页 20 条会漏掉排在后面的
         # 今日歌单，这里翻页取全（每页 100 条，最多 2000 条兜底，避免异常情况下无限翻页）。
@@ -97,30 +99,26 @@ class NeteaseMusic:
             raise APIException(f"获取用户歌单请求失败: {str(e)}")
         except (json.JSONDecodeError, KeyError) as e:
             raise APIException(f"解析用户歌单响应失败: {str(e)}")
-        except Exception as e:
-            raise APIException(f"处理用户歌单时发生未知错误: {str(e)}")
-        
-    def get_playlist_detail(self, playlist_id: int, cookies: Dict[str, str]) -> Dict[str, Any]:
+
+    def get_playlist_detail(self, playlist_id: int, cookies: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """获取歌单详情
         
         Args:
             playlist_id: 歌单ID
-            cookies: 用户cookies
-            
+            cookies: 用户cookies（缺省时用实例自身的 cookies）
+
         Returns:
             歌单详情信息
-            
+
         Raises:
             APIException: API调用失败时抛出
         """
+        cookies = cookies or self.cookies
         try:
             data = {'id': playlist_id}
-            headers = {
-                'User-Agent': APIConstants.USER_AGENT,
-                'Referer': APIConstants.REFERER
-            }
-            
-            response = SESSION.post(APIConstants.PLAYLIST_DETAIL_API, data=data, 
+            headers = self._default_headers()
+
+            response = SESSION.post(APIConstants.PLAYLIST_DETAIL_API, data=data,
                                    headers=headers, cookies=cookies, timeout=30)
             response.raise_for_status()
             
@@ -129,7 +127,7 @@ class NeteaseMusic:
                 raise APIException(f"获取歌单详情失败: {result.get('message', '未知错误')}")
             
             playlist = result.get('playlist', {})
-            # 网易云API的album.publishTime为13位毫秒级时间戳
+            # createTime 为13位毫秒级时间戳，交由工具函数统一转换
             create_timestamp = playlist.get('createTime')
             # 转换为年月日格式（调用工具函数）
             create_time = timestamp_to_date(create_timestamp)
@@ -145,23 +143,30 @@ class NeteaseMusic:
             }
             
             # 获取所有trackIds并分批获取详细信息
-            track_ids = [str(t['id']) for t in playlist.get('trackIds', [])]
+            track_ids = [t['id'] for t in playlist.get('trackIds', [])]
             for i in range(0, len(track_ids), 100):
                 batch_ids = track_ids[i:i+100]
-                song_data = {'c': json.dumps([{'id': int(sid), 'v': 0} for sid in batch_ids])}
-                
-                song_resp = SESSION.post(APIConstants.SONG_DETAIL_V3, data=song_data, 
+                song_data = {'c': json.dumps([{'id': sid, 'v': 0} for sid in batch_ids])}
+
+                song_resp = SESSION.post(APIConstants.SONG_DETAIL_V3, data=song_data,
                                         headers=headers, cookies=cookies, timeout=30)
                 song_resp.raise_for_status()
-                
+
                 song_result = song_resp.json()
+                # 与其它接口一致地校验返回码：某批触发风控返回非200时应报错，
+                # 而非静默丢掉这一批歌（否则当天推荐会莫名少几首且无日志）
+                if song_result.get('code') != 200:
+                    raise APIException(f"批量获取歌曲详情失败: {song_result.get('message', '未知错误')}")
                 for song in song_result.get('songs', []):
+                    # 用 .get() 容错：个别下架歌可能缺 al/ar 字段，缺字段时跳过该字段而非
+                    # 让 KeyError 拖垮整批（外层会把 KeyError 报成整个歌单解析失败）
+                    al = song.get('al') or {}
                     info['tracks'].append({
-                        'id': song['id'],
-                        'name': song['name'],
-                        'artists': [artist['name'] for artist in song['ar']],
-                        'album': song['al']['name'],
-                        'picUrl': song['al']['picUrl']
+                        'id': song.get('id'),
+                        'name': song.get('name'),
+                        'artists': [artist['name'] for artist in song.get('ar', [])],
+                        'album': al.get('name', ''),
+                        'picUrl': al.get('picUrl', '')
                     })
             
             return info
@@ -170,26 +175,24 @@ class NeteaseMusic:
         except (json.JSONDecodeError, KeyError) as e:
             raise APIException(f"解析歌单详情响应失败: {e}")
     
-    def get_album_detail(self, album_id: int, cookies: Dict[str, str]) -> Dict[str, Any]:
+    def get_album_detail(self, album_id: int, cookies: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """获取专辑详情
-        
+
         Args:
             album_id: 专辑ID
-            cookies: 用户cookies
-            
+            cookies: 用户cookies（缺省时用实例自身的 cookies）
+
         Returns:
             专辑详情信息
-            
+
         Raises:
             APIException: API调用失败时抛出
         """
+        cookies = cookies or self.cookies
         try:
             url = f'{APIConstants.ALBUM_DETAIL_API}{album_id}'
-            headers = {
-                'User-Agent': APIConstants.USER_AGENT,
-                'Referer': APIConstants.REFERER
-            }
-            
+            headers = self._default_headers()
+
             response = SESSION.get(url, headers=headers, cookies=cookies, timeout=30)
             response.raise_for_status()
             
@@ -209,12 +212,13 @@ class NeteaseMusic:
             }
             
             for song in result.get('songs', []):
+                al = song.get('al') or {}
                 info['songs'].append({
-                    'id': song['id'],
-                    'name': song['name'],
-                    'artists': [artist['name'] for artist in song['ar']],
-                    'album': song['al']['name'],
-                    'picUrl': self.get_pic_url(song['al'].get('pic'))
+                    'id': song.get('id'),
+                    'name': song.get('name'),
+                    'artists': [artist['name'] for artist in song.get('ar', [])],
+                    'album': al.get('name', ''),
+                    'picUrl': self.get_pic_url(al.get('pic'))
                 })
             
             return info
@@ -282,11 +286,8 @@ class NeteaseMusic:
                 return {'valid': False, 'is_vip': False}
             
             # 调用用户账号信息接口验证登录状态
-            headers = {
-                'User-Agent': APIConstants.USER_AGENT,
-                'Referer': APIConstants.REFERER
-            }
-            
+            headers = self._default_headers()
+
             # 发送请求（该接口无需复杂参数，仅需登录态Cookie）
             response = SESSION.post(
                 APIConstants.USER_ACCOUNT_API,
@@ -313,14 +314,14 @@ class NeteaseMusic:
                     self.logger.warning(f"Cookie无效：profile为None（{result.get('profile')}）")
                 return {'valid': False, 'is_vip': False}
 
+        # 只兜住"网络/响应解析"这类确实等价于"无法验证 cookie"的可预期异常并返回无效；
+        # 其它意外异常不再吞掉，交由 run_task 的顶层处理器记录完整堆栈（避免把编程 bug
+        # 伪装成"Cookie无效"而误导排查）。
         except requests.RequestException as e:
             self.logger.error(f"Cookie验证请求失败: {e}")
             return {'valid': False, 'is_vip': False}
         except json.JSONDecodeError as e:
             self.logger.error(f"解析验证响应失败: {e}")
-            return {'valid': False, 'is_vip': False}
-        except Exception as e:
-            self.logger.error(f"Cookie验证发生未知错误: {e}")
             return {'valid': False, 'is_vip': False}
 
     def get_pic_url(self, pic_id: Optional[int], size: int = 300) -> str:
@@ -340,20 +341,21 @@ class NeteaseMusic:
         return f'https://p3.music.126.net/{enc_id}/{pic_id}.jpg?param={size}y{size}'
 
     
-    def get_song_url(self, song_id: int, quality: str, cookies: Dict[str, str]) -> Dict[str, Any]:
+    def get_song_url(self, song_id: int, quality: str, cookies: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """获取歌曲播放URL
-        
+
         Args:
             song_id: 歌曲ID
             quality: 音质等级 (standard, exhigh, lossless, hires, sky, jyeffect, jymaster)
-            cookies: 用户cookies
-            
+            cookies: 用户cookies（缺省时用实例自身的 cookies）
+
         Returns:
             包含歌曲URL信息的字典
-            
+
         Raises:
             APIException: API调用失败时抛出
         """
+        cookies = cookies or self.cookies
         try:
             config = APIConstants.DEFAULT_CONFIG.copy()
             config["requestId"] = str(randrange(20000000, 30000000))
@@ -394,10 +396,7 @@ class NeteaseMusic:
         """
         try:
             data = {'c': json.dumps([{"id": song_id, "v": 0}])}
-            headers = {
-                'User-Agent': APIConstants.USER_AGENT,
-                'Referer': APIConstants.REFERER
-            }
+            headers = self._default_headers()
             response = SESSION.post(APIConstants.SONG_DETAIL_V3, data=data,
                                     headers=headers, cookies=cookies or self.cookies, timeout=30)
             response.raise_for_status()
@@ -412,19 +411,20 @@ class NeteaseMusic:
         except json.JSONDecodeError as e:
             raise APIException(f"解析歌曲详情响应失败: {e}")
     
-    def get_lyric(self, song_id: int, cookies: Dict[str, str]) -> Dict[str, Any]:
+    def get_lyric(self, song_id: int, cookies: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """获取歌词信息
-        
+
         Args:
             song_id: 歌曲ID
-            cookies: 用户cookies
-            
+            cookies: 用户cookies（缺省时用实例自身的 cookies）
+
         Returns:
             包含歌词信息的字典
-            
+
         Raises:
             APIException: API调用失败时抛出
         """
+        cookies = cookies or self.cookies
         try:
             data = {
                 'id': song_id, 
@@ -438,12 +438,9 @@ class NeteaseMusic:
                 'yrv': '0'
             }
             
-            headers = {
-                'User-Agent': APIConstants.USER_AGENT,
-                'Referer': APIConstants.REFERER
-            }
-            
-            response = SESSION.post(APIConstants.LYRIC_API, data=data, 
+            headers = self._default_headers()
+
+            response = SESSION.post(APIConstants.LYRIC_API, data=data,
                                    headers=headers, cookies=cookies, timeout=30)
             response.raise_for_status()
             

@@ -7,13 +7,13 @@ import io
 import logging
 from pathlib import Path
 
-import requests
 from PIL import Image
 from mutagen.flac import FLAC, Picture
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, APIC, TYER, USLT
 from mutagen.mp4 import MP4, MP4Cover
 
+from http_client import SESSION
 from models import MusicInfo
 
 logger = logging.getLogger(__name__)
@@ -26,10 +26,17 @@ def _cover_mime(data: bytes) -> str:
     return 'image/jpeg' if data[:2] == b'\xff\xd8' else 'image/png'
 
 
+def _year_of(date: str) -> str:
+    """从 YYYY-MM-DD / YYYY 形式的发行时间里取年份（无 '-' 时原样返回）。"""
+    return date.split('-')[0] if '-' in date else date
+
+
 def _fetch_cover(pic_url: str) -> bytes | None:
     """下载封面并按需压缩到 _MAX_COVER_SIZE 以内；下载/压缩失败均返回 None。"""
     try:
-        resp = requests.get(pic_url, timeout=10)
+        # 复用带重试/退避的共享 Session：封面来自 CDN，偶发 5xx/连接抖动时自动重试，
+        # 避免一整批歌因瞬时故障全都缺封面（失败仍返回 None，不致命）
+        resp = SESSION.get(pic_url, timeout=10)
         resp.raise_for_status()
         data = resp.content
         if len(data) > _MAX_COVER_SIZE:
@@ -46,17 +53,17 @@ def _fetch_cover(pic_url: str) -> bytes | None:
 
 
 def write_tags(file_path: Path, music_info: MusicInfo) -> None:
-    """按文件扩展名分派到对应的标签写入实现。"""
-    try:
-        file_ext = file_path.suffix.lower()
-        if file_ext == '.mp3':
-            _write_mp3_tags(file_path, music_info)
-        elif file_ext == '.flac':
-            _write_flac_tags(file_path, music_info)
-        elif file_ext == '.m4a':
-            _write_m4a_tags(file_path, music_info)
-    except Exception as e:
-        logger.error(f"写入音乐标签失败: {e}")
+    """按文件扩展名分派到对应的标签写入实现。
+
+    各写入器内部已各自吞掉异常（标签写失败不应连累已下好的音频），故此处无需再兜。
+    """
+    file_ext = file_path.suffix.lower()
+    if file_ext == '.mp3':
+        _write_mp3_tags(file_path, music_info)
+    elif file_ext == '.flac':
+        _write_flac_tags(file_path, music_info)
+    elif file_ext == '.m4a':
+        _write_m4a_tags(file_path, music_info)
 
 
 def _write_mp3_tags(file_path: Path, music_info: MusicInfo) -> None:
@@ -78,8 +85,7 @@ def _write_mp3_tags(file_path: Path, music_info: MusicInfo) -> None:
         if music_info.publishTime:
             full_date = music_info.publishTime.strip()
             try:
-                year = full_date.split('-')[0] if '-' in full_date else full_date
-                audio.tags.setall('TYER', [TYER(encoding=3, text=year)])
+                audio.tags.setall('TYER', [TYER(encoding=3, text=_year_of(full_date))])
                 audio.tags.setall('TDRC', [TDRC(encoding=3, text=full_date)])
             except Exception as e:
                 logger.warning(f"发行时间处理失败: {str(e)}")
@@ -124,7 +130,7 @@ def _write_flac_tags(file_path: Path, music_info: MusicInfo) -> None:
         # 发行时间
         if music_info.publishTime:
             full_date = music_info.publishTime
-            audio['YEAR'] = full_date.split('-')[0] if '-' in full_date else full_date
+            audio['YEAR'] = _year_of(full_date)
             audio['DATE'] = full_date
         else:
             logger.debug("publishTime为空，跳过日期标签")
@@ -154,7 +160,7 @@ def _write_flac_tags(file_path: Path, music_info: MusicInfo) -> None:
 
 
 def _write_m4a_tags(file_path: Path, music_info: MusicInfo) -> None:
-    """写入M4A标签"""
+    """写入M4A标签（与 mp3/flac 对齐：含发行时间与歌词）"""
     try:
         audio = MP4(str(file_path))
 
@@ -164,6 +170,16 @@ def _write_m4a_tags(file_path: Path, music_info: MusicInfo) -> None:
 
         if music_info.track_number > 0:
             audio['trkn'] = [(music_info.track_number, 0)]
+
+        # 发行时间（MP4 用 \xa9day 存日期）
+        if music_info.publishTime:
+            audio['\xa9day'] = music_info.publishTime
+        else:
+            logger.debug("publishTime为空，跳过日期标签")
+
+        # 歌词（MP4 用 \xa9lyr；无标准的翻译歌词 atom，tlyric 此处不写）
+        if music_info.lyric:
+            audio['\xa9lyr'] = music_info.lyric.strip()
 
         # 下载并添加封面（统一走压缩，避免超大封面）
         if music_info.pic_url:
@@ -218,9 +234,12 @@ def compress_image(image_data: bytes, max_size: int = _MAX_COVER_SIZE, max_dimen
             if is_png:
                 logger.debug("PNG转JPEG尝试压缩")
                 if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-                    background = Image.new(img.mode[:-1], img.size, (255, 255, 255))
-                    background.paste(img, img.split()[-1])
-                    img = background.convert('RGB')
+                    # 先统一转成带 alpha 的 RGBA，避免 'P' 模式走 img.mode[:-1] 得到空字符串而崩溃；
+                    # 再用白底合成后转 RGB（JPEG 不支持透明通道）
+                    img = img.convert('RGBA')
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[-1])
+                    img = background
                 else:
                     img = img.convert('RGB')
                 img_format = 'JPEG'
