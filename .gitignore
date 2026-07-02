@@ -5,6 +5,7 @@ logs/
 
 #忽略自用config.yaml
 config.yaml
+CLAUDE.md
 
 #忽略Python 等生成文件
 __pycache__
